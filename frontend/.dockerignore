@@ -1,0 +1,10 @@
+# Dependencias: o build instala dentro do container (npm ci).
+node_modules/
+
+# Saidas locais (o build do stage 1 gera /app/dist no container).
+dist/
+.vite/
+
+# Dev junk
+.DS_Store
+*.log

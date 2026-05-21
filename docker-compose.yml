@@ -1,0 +1,86 @@
+# Compose com 3 servicos:
+#   - postgres  : banco de dados (auth/funcionarios)
+#   - backend   : FastAPI + cliente da Marketing API
+#   - frontend  : nginx servindo o build React (proxy /api -> backend)
+#
+# Uso:
+#   docker compose up --build       # primeira vez (ou apos alterar deps)
+#   docker compose up               # subir
+#   docker compose down             # parar (mantem o volume do postgres)
+#   docker compose down -v          # parar e APAGAR o volume do postgres
+#
+# Acesso:
+#   App:           http://localhost:8080
+#   API direta:    http://localhost:8000   (debug)
+#   Postgres:      localhost:5432           (debug — credenciais no .env)
+#
+# Rodar o seed dentro do container (depois que postgres estiver up):
+#   docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /seed/seed.sql
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dashboard-meta-postgres
+    # As variaveis POSTGRES_* sao lidas do backend/.env (mesmo arquivo).
+    # Voce pode definir tambem em compose.yml diretamente se preferir.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dashmeta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-dashmeta}
+    volumes:
+      # Dados do postgres persistem em volume nomeado (sobrevive a `docker compose down`).
+      - postgres-data:/var/lib/postgresql/data
+      # Disponibiliza a seed dentro do container em /seed/seed.sql (read-only).
+      # Voce roda manualmente: docker compose exec postgres psql -f /seed/seed.sql
+      - ./backend/seed.sql:/seed/seed.sql:ro
+    ports:
+      # Expor a porta eh opcional. Util pra conectar com cliente externo
+      # (DBeaver, pgcli, etc.) durante debug. Em producao restrita por firewall
+      # ou simplesmente remova esta entrada.
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dashmeta} -d ${POSTGRES_DB:-dashmeta}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    container_name: dashboard-meta-backend
+    # Segredos (JWT_SECRET, ADMIN_PASSWORD, ANTHROPIC_API_KEY, POSTGRES_*)
+    # injetados em runtime via env_file. NUNCA entram na imagem.
+    env_file:
+      - ./backend/.env
+    environment:
+      # Constroi a DATABASE_URL a partir das mesmas variaveis do postgres.
+      # Hostname "postgres" eh resolvido pela rede interna do compose.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dashmeta}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-dashmeta}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: dashboard-meta-frontend
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

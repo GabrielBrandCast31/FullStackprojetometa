@@ -1,0 +1,127 @@
+import { useEffect, useMemo, useState } from "react";
+import { money, num, roasClass } from "../lib/format.js";
+
+function StatusTag({ status }) {
+  if (status === "ACTIVE") return <span className="tag tag-active">Ativa</span>;
+  if ((status || "").includes("PAUSED")) return <span className="tag tag-paused">Pausada</span>;
+  const label = {
+    ARCHIVED: "Arquivada", DELETED: "Excluída",
+    IN_PROCESS: "Processando", WITH_ISSUES: "Com problemas",
+  }[status] || status;
+  return <span className="tag tag-other">{label}</span>;
+}
+
+export default function Campaigns({ campaigns, clients, prefilter, onPrefilterConsumed }) {
+  const [statusFilter, setStatusFilter] = useState("ACTIVE");
+  const [clientFilter, setClientFilter] = useState("ALL");
+  const [search, setSearch] = useState("");
+
+  // Consome pre-filtro vindo da Visao Geral (cliente clicado).
+  useEffect(() => {
+    if (prefilter) {
+      if (prefilter.client) setClientFilter(prefilter.client);
+      if (prefilter.status) setStatusFilter(prefilter.status);
+      onPrefilterConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefilter]);
+
+  const clientOptions = useMemo(() => (
+    [...new Set(clients.map((c) => c.name))].sort()
+  ), [clients]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return campaigns.filter((c) => {
+      if (statusFilter === "ACTIVE" && c.status !== "ACTIVE") return false;
+      if (statusFilter === "PAUSED" && !(c.status || "").includes("PAUSED")) return false;
+      if (clientFilter !== "ALL" && c.client !== clientFilter) return false;
+      if (q && !c.name.toLowerCase().includes(q)) return false;
+      return true;
+    }).sort((a, b) => b.spend - a.spend);
+  }, [campaigns, statusFilter, clientFilter, search]);
+
+  return (
+    <section id="view-campaigns" className="view">
+      <section className="panel filters">
+        <div className="field field-sm">
+          <label htmlFor="filter-status">Status</label>
+          <select
+            id="filter-status" value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="ACTIVE">Apenas ativas</option>
+            <option value="ALL">Todas</option>
+            <option value="PAUSED">Pausadas</option>
+          </select>
+        </div>
+        <div className="field field-sm">
+          <label htmlFor="filter-client">Cliente</label>
+          <select
+            id="filter-client" value={clientFilter}
+            onChange={(e) => setClientFilter(e.target.value)}
+          >
+            <option value="ALL">Todos os clientes</option>
+            {clientOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="filter-search">Buscar campanha</label>
+          <input
+            type="text" id="filter-search" placeholder="Filtrar por nome..."
+            value={search} onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <span className="filter-count">
+          {filtered.length} de {campaigns.length} campanhas
+        </span>
+      </section>
+
+      <section className="panel table-panel">
+        <h2>Campanhas</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Campanha</th><th>Cliente</th><th>Status</th>
+                <th>Orçamento</th><th>Investido</th><th>Impressões</th>
+                <th>Cliques</th><th>CTR</th><th>Conv.</th>
+                <th>Resultados</th><th>Compras</th><th>Receita</th>
+                <th>ROAS</th><th>CPA</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!filtered.length && (
+                <tr className="empty-row">
+                  <td colSpan={14}>Nenhuma campanha para os filtros selecionados.</td>
+                </tr>
+              )}
+              {filtered.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td>{c.client}</td>
+                  <td><StatusTag status={c.status} /></td>
+                  <td>
+                    {c.budget
+                      ? <>{money(c.budget, c.currency)} <small>{c.budget_type}</small></>
+                      : "—"}
+                  </td>
+                  <td>{money(c.spend, c.currency)}</td>
+                  <td>{num(c.impressions)}</td>
+                  <td>{num(c.clicks)}</td>
+                  <td>{c.ctr.toFixed(2)}%</td>
+                  <td>{c.conv_rate.toFixed(1)}%</td>
+                  <td>{num(c.results)} <small>{c.results_label}</small></td>
+                  <td>{num(c.purchases)}</td>
+                  <td>{money(c.revenue, c.currency)}</td>
+                  <td className={roasClass(c.roas)}>{c.roas.toFixed(2)}</td>
+                  <td>{c.cpa ? money(c.cpa, c.currency) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  );
+}
