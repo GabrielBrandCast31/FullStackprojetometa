@@ -1,0 +1,19 @@
+# Virtualenv local — pesado e linkado a paths do host
+venv/
+.venv/
+
+# Bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Segredos: NUNCA entram na imagem.
+# A .env eh carregada via `env_file` no docker-compose em runtime.
+.env
+
+# Banco SQLite: persistido via volume, nao deve ficar dentro da imagem.
+users.db
+
+# Dev junk
+.DS_Store
+*.log
