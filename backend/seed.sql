@@ -44,9 +44,9 @@ CREATE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email));
 -- pela tela /register (precisa de ADMIN_PASSWORD).
 INSERT INTO users (name, email, password_hash)
 VALUES (
-    'Administrador',
-    'admin@brandcast.com.br',
-    crypt('TROQUE_ESTA_SENHA', gen_salt('bf', 12))
+    'Gabriel',
+    'gabriel@brandcast.com.br',
+    crypt('gabriel123', gen_salt('bf', 12))
 )
 ON CONFLICT (email) DO NOTHING;
 
