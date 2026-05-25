@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { postJSON, saveToken } from "../lib/api.js";
+import BrandLogo from "../components/BrandLogo.jsx";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -30,8 +31,8 @@ export default function Login() {
     <div className="auth-body">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="logo">◆</span>
-          <h1>Dashboard Meta Ads</h1>
+          <BrandLogo height={78} />
+          <p className="auth-platform">Dashboard Meta Ads</p>
         </div>
         <p className="auth-sub">Entre com sua conta de funcionário</p>
 

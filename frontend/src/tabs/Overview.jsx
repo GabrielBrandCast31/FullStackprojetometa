@@ -3,6 +3,7 @@ import { money, num, pct, roasClass } from "../lib/format.js";
 import { computeSaldo } from "../lib/saldo.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { fetchAuth } from "../lib/api.js";
+import { generateReport } from "../lib/report.js";
 
 const SUGGESTIONS = [
   ["Quais clientes estão com problemas de desempenho?", "Clientes com problema"],
@@ -13,19 +14,27 @@ const SUGGESTIONS = [
 
 export default function Overview({
   clients, campaigns, manualSaldo, datePreset,
-  onEditSaldo, onOpenClient, aiEnabled,
+  onEditSaldo, onOpenClient, aiEnabled, setStatus,
 }) {
+  function exportPdf() {
+    generateReport({
+      clients, accountId: null, datePreset, manualSaldo,
+      onError: (msg) => setStatus && setStatus({ msg, type: "error" }),
+    });
+  }
+
   // KPIs gerais.
   const k = useMemo(() => {
     const spend = campaigns.reduce((s, c) => s + c.spend, 0);
     const revenue = campaigns.reduce((s, c) => s + c.revenue, 0);
-    const purchases = campaigns.reduce((s, c) => s + c.purchases, 0);
+    const conversions = campaigns.reduce((s, c) => s + (c.results || 0), 0);
     const impressions = campaigns.reduce((s, c) => s + c.impressions, 0);
     const clicks = campaigns.reduce((s, c) => s + c.clicks, 0);
     return {
-      spend, revenue, purchases, impressions, clicks,
+      spend, revenue, conversions, impressions, clicks,
       roas: spend ? revenue / spend : 0,
       ctr: impressions ? (clicks / impressions) * 100 : 0,
+      cpa: conversions ? spend / conversions : 0,
       activeClients: clients.filter((c) => c.account_status === 1).length,
       activeCampaigns: campaigns.filter((c) => c.status === "ACTIVE").length,
     };
@@ -38,7 +47,8 @@ export default function Overview({
       label: "ROAS geral", value: k.roas.toFixed(2),
       cls: k.roas >= 2 ? "green" : k.roas >= 1 ? "yellow" : "red",
     },
-    { label: "Compras", value: num(k.purchases) },
+    { label: "Conversões", value: num(k.conversions) },
+    { label: "Custo por Conversão", value: k.cpa ? money(k.cpa) : "—" },
     { label: "Clientes ativos", value: `${k.activeClients}/${clients.length}` },
     { label: "Campanhas ativas", value: num(k.activeCampaigns) },
     { label: "CTR médio", value: k.ctr.toFixed(2) + "%" },
@@ -66,6 +76,18 @@ export default function Overview({
 
   return (
     <section id="view-overview" className="view">
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Visão Geral</h2>
+            <p className="panel-hint">Resumo consolidado de todos os clientes carregados.</p>
+          </div>
+          <button className="btn-primary" onClick={exportPdf} disabled={!clients.length}>
+            📄 Baixar PDF da visão geral
+          </button>
+        </div>
+      </section>
+
       <section id="kpis" className="kpi-grid">
         {kpiCards.map((c) => (
           <div className="kpi" key={c.label}>
@@ -74,11 +96,6 @@ export default function Overview({
           </div>
         ))}
       </section>
-
-      <Critical
-        clients={clients} manualSaldo={manualSaldo} datePreset={datePreset}
-        onEditSaldo={onEditSaldo} onOpenClient={onOpenClient}
-      />
 
       <div className="panel-grid">
         <MiniPanel title="🏆 Melhores campanhas" hint="(ROAS)">

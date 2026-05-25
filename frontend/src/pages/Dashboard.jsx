@@ -11,13 +11,14 @@ import Clients from "../tabs/Clients.jsx";
 import Campaigns from "../tabs/Campaigns.jsx";
 import Charts from "../tabs/Charts.jsx";
 import NewCampaign from "../tabs/NewCampaign.jsx";
+import BrandLogo from "../components/BrandLogo.jsx";
 
 const TABS = [
-  ["overview", "Visão Geral"],
-  ["clients", "Clientes"],
-  ["campaigns", "Campanhas"],
-  ["charts", "Gráficos"],
-  ["new-campaign", "Nova campanha"],
+  ["overview", "Visão Geral", "📊"],
+  ["clients", "Clientes", "👥"],
+  ["campaigns", "Campanhas", "🎯"],
+  ["charts", "Gráficos", "📈"],
+  ["new-campaign", "Nova campanha", "➕"],
 ];
 
 export default function Dashboard() {
@@ -153,51 +154,69 @@ export default function Dashboard() {
   };
 
   return (
-    <>
-      <Topbar
-        accountName={accountCount}
-        userName={user ? (user.name || user.email || "") : ""}
-        onLogout={logout}
-      />
-
-      <section className="panel connect-panel">
-        <div className="field">
-          <label htmlFor="token">Access Token do Facebook</label>
-          <input
-            type="password" id="token"
-            placeholder="Cole aqui o seu access token" autoComplete="off"
-            value={token} onChange={(e) => setToken(e.target.value)}
-          />
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <BrandLogo height={53} />
         </div>
-        <div className="field field-sm">
-          <label htmlFor="period">Período</label>
-          <select id="period" value={period} onChange={(e) => setPeriod(e.target.value)}>
-            {PERIOD_OPTIONS.map(([v, label]) => (
-              <option key={v} value={v}>{label}</option>
-            ))}
-          </select>
+
+        <nav className="sidebar-nav">
+          {TABS.map(([id, label, icon]) => (
+            <button
+              key={id}
+              className={"sidebar-item" + (view === id ? " active" : "")}
+              onClick={() => { setView(id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+              disabled={!loaded}
+              title={!loaded ? "Carregue os clientes primeiro" : label}
+            >
+              <span className="sidebar-icon">{icon}</span>
+              <span className="sidebar-label">{label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-foot">
+          {user && (
+            <div className="sidebar-user">
+              <span className="sidebar-user-name">{user.name || user.email || ""}</span>
+            </div>
+          )}
+          <button className="btn-ghost sidebar-logout" onClick={logout}>Sair</button>
         </div>
-        <button className="btn-primary" onClick={loadOverview} disabled={loading}>
-          Carregar clientes
-        </button>
-      </section>
+      </aside>
 
-      <p className={"status-msg" + (status.type ? " " + status.type : "")}>{status.msg}</p>
+      <div className="app-main">
+        <Topbar
+          accountName={accountCount}
+          userName={user ? (user.name || user.email || "") : ""}
+          onLogout={logout}
+        />
 
-      {loaded && (
-        <>
-          <nav className="tabs">
-            {TABS.map(([id, label]) => (
-              <button
-                key={id}
-                className={"tab" + (view === id ? " active" : "")}
-                onClick={() => { setView(id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
+        <section className="panel connect-panel">
+          <div className="field">
+            <label htmlFor="token">Access Token do Facebook</label>
+            <input
+              type="password" id="token"
+              placeholder="Cole aqui o seu access token" autoComplete="off"
+              value={token} onChange={(e) => setToken(e.target.value)}
+            />
+          </div>
+          <div className="field field-sm">
+            <label htmlFor="period">Período</label>
+            <select id="period" value={period} onChange={(e) => setPeriod(e.target.value)}>
+              {PERIOD_OPTIONS.map(([v, label]) => (
+                <option key={v} value={v}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <button className="btn-primary" onClick={loadOverview} disabled={loading}>
+            Carregar clientes
+          </button>
+        </section>
 
+        <p className={"status-msg" + (status.type ? " " + status.type : "")}>{status.msg}</p>
+
+        {loaded && (
           <main id="dashboard">
             {view === "overview"     && <Overview {...sharedProps} aiEnabled={aiEnabled} />}
             {view === "clients"      && <Clients {...sharedProps} />}
@@ -207,23 +226,23 @@ export default function Dashboard() {
             {view === "charts"       && <Charts {...sharedProps} metaToken={token} onLogout={logout} />}
             {view === "new-campaign" && <NewCampaign {...sharedProps} metaToken={token} onLogout={logout} />}
           </main>
-        </>
-      )}
+        )}
 
-      {saldoEditing && (
-        <SaldoModal
-          accountId={saldoEditing.accountId}
-          clientName={saldoEditing.name}
-          current={manualSaldo[saldoEditing.accountId]}
-          onClose={() => setSaldoEditing(null)}
-          onSave={(valor, data) => { setSaldo(saldoEditing.accountId, valor, data); setSaldoEditing(null); }}
-          onRemove={() => { removeSaldo(saldoEditing.accountId); setSaldoEditing(null); }}
-        />
-      )}
+        {saldoEditing && (
+          <SaldoModal
+            accountId={saldoEditing.accountId}
+            clientName={saldoEditing.name}
+            current={manualSaldo[saldoEditing.accountId]}
+            onClose={() => setSaldoEditing(null)}
+            onSave={(valor, data) => { setSaldo(saldoEditing.accountId, valor, data); setSaldoEditing(null); }}
+            onRemove={() => { removeSaldo(saldoEditing.accountId); setSaldoEditing(null); }}
+          />
+        )}
 
-      <footer className="footer">
-        O token é guardado apenas no seu navegador e enviado direto ao backend para consultar a API do Meta.
-      </footer>
-    </>
+        <footer className="footer">
+          O token é guardado apenas no seu navegador e enviado direto ao backend para consultar a API do Meta.
+        </footer>
+      </div>
+    </div>
   );
 }

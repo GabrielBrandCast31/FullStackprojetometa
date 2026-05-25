@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { postJSON } from "../lib/api.js";
+import BrandLogo from "../components/BrandLogo.jsx";
 
 // Fluxo em 2 etapas: 1) senha de adm; 2) dados do funcionario.
 export default function Register() {
@@ -59,7 +60,7 @@ export default function Register() {
     <div className="auth-body">
       <div className="auth-card">
         <div className="auth-brand">
-          <span className="logo">◆</span>
+          <BrandLogo height={78} />
           <h1>Cadastro de funcionários</h1>
         </div>
         <p className="auth-sub">Área restrita ao administrador</p>

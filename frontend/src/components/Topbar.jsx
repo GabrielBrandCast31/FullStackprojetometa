@@ -1,9 +1,10 @@
+import BrandLogo from "./BrandLogo.jsx";
+
 export default function Topbar({ accountName, userName, onLogout }) {
   return (
     <header className="topbar">
       <div className="brand">
-        <span className="logo">◆</span>
-        <h1>Dashboard Meta Ads</h1>
+        <BrandLogo height={45} />
       </div>
       <div className="topbar-right">
         <span className="account-name">{accountName}</span>

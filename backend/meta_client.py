@@ -138,7 +138,8 @@ async def fetch_campaign_insights(client, version, account_id, token, date_prese
         "level": "campaign",
         "fields": (
             "campaign_id,spend,impressions,clicks,ctr,cpc,cpm,reach,frequency,"
-            "actions,action_values,purchase_roas,cost_per_action_type"
+            "actions,action_values,purchase_roas,cost_per_action_type,"
+            "attribution_setting,inline_link_clicks"
         ),
         "date_preset": date_preset,
         "limit": 200,

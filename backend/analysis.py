@@ -109,10 +109,14 @@ def build_campaigns(raw_campaigns: list[dict], raw_insights: list[dict]) -> list
             "objective": c.get("objective", ""),
             "budget": round(budget, 2),
             "budget_type": budget_type,
+            "start_time": c.get("start_time", ""),
+            "stop_time": c.get("stop_time", ""),
             "spend": round(spend, 2),
             "impressions": int(_to_float(ins.get("impressions"))),
             "clicks": int(_to_float(ins.get("clicks"))),
+            "link_clicks": int(_to_float(ins.get("inline_link_clicks")) or link_clicks),
             "reach": int(_to_float(ins.get("reach"))),
+            "frequency": round(_to_float(ins.get("frequency")), 2),
             "ctr": round(_to_float(ins.get("ctr")), 2),
             "cpc": round(_to_float(ins.get("cpc")), 2),
             "cpm": round(_to_float(ins.get("cpm")), 2),
@@ -123,7 +127,9 @@ def build_campaigns(raw_campaigns: list[dict], raw_insights: list[dict]) -> list
             "results": round(results, 2),
             "results_label": results_label,
             "cpa": round(cpa, 2),
+            "cost_per_result": round(cpa, 2),
             "conv_rate": round(conv_rate, 2),
+            "attribution_setting": ins.get("attribution_setting", ""),
         })
 
     return result

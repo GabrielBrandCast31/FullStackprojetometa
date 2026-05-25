@@ -16,6 +16,7 @@ import {
 import { money, num } from "../lib/format.js";
 import { chartColor } from "../lib/constants.js";
 import { fetchAuth } from "../lib/api.js";
+import { generateChartsReport } from "../lib/report.js";
 
 ChartJS.register(
   ArcElement, BarElement, CategoryScale, Filler, Legend,
@@ -27,9 +28,31 @@ function fmtBRLAxis(v) { return "R$ " + Math.round(v).toLocaleString("pt-BR"); }
 const METRIC_LABELS = {
   spend: "Investido", revenue: "Receita", roas: "ROAS",
   purchases: "Compras", clicks: "Cliques",
+  reach: "Alcance", cpm: "CPM",
+  link_clicks: "Cliques no link", cost_per_result: "Custo por resultado",
+  results: "Resultados", frequency: "Frequência",
 };
 
-export default function Charts({ clients, campaigns, datePreset, metaToken }) {
+export default function Charts({ clients, campaigns, datePreset, metaToken, setStatus }) {
+  // Captura cada <canvas> dentro de .chart-panel como PNG e dispara o PDF.
+  function exportChartsPdf() {
+    const panels = document.querySelectorAll("#view-charts .chart-panel");
+    const collected = [];
+    panels.forEach((panel) => {
+      const canvas = panel.querySelector("canvas");
+      if (!canvas || !canvas.width || !canvas.height) return;
+      const title = panel.querySelector("h2")?.textContent?.trim() || "";
+      const hint = panel.querySelector(".panel-hint")?.textContent?.trim() || "";
+      try {
+        collected.push({ title, hint, dataUrl: canvas.toDataURL("image/png") });
+      } catch { /* tainted canvas, ignora */ }
+    });
+    generateChartsReport({
+      charts: collected, clients, campaigns, datePreset,
+      onError: (msg) => setStatus && setStatus({ msg, type: "error" }),
+    });
+  }
+
   const [metric, setMetric] = useState("spend");
   const [topN, setTopN] = useState(10);
   const [clientFilter, setClientFilter] = useState("ALL");
@@ -43,12 +66,22 @@ export default function Charts({ clients, campaigns, datePreset, metaToken }) {
 
   const byClient = useMemo(() => {
     return clients
-      .map((cl) => ({
-        name: cl.name,
-        spend: cl.summary.total_spend,
-        revenue: cl.summary.total_revenue,
-        roas: cl.summary.roas,
-      }))
+      .map((cl) => {
+        const camps = cl.campaigns || [];
+        const reach = camps.reduce((s, c) => s + (c.reach || 0), 0);
+        const impressions = cl.summary.total_impressions;
+        // Frequência média ponderada por impressões.
+        const freqWeighted = camps.reduce((s, c) => s + (c.frequency || 0) * (c.impressions || 0), 0);
+        const frequency = impressions ? freqWeighted / impressions : 0;
+        return {
+          name: cl.name,
+          spend: cl.summary.total_spend,
+          revenue: cl.summary.total_revenue,
+          roas: cl.summary.roas,
+          reach,
+          frequency,
+        };
+      })
       .filter((c) => c.spend > 0)
       .sort((a, b) => b.spend - a.spend)
       .slice(0, 12);
@@ -127,7 +160,13 @@ export default function Charts({ clients, campaigns, datePreset, metaToken }) {
     return [...arr].sort((a, b) => (b[metric] || 0) - (a[metric] || 0)).slice(0, topN);
   }, [campaigns, metric, topN, clientFilter]);
 
-  const isMoney = metric === "spend" || metric === "revenue";
+  const isMoney = ["spend", "revenue", "cpm", "cost_per_result"].includes(metric);
+  const isDecimal = metric === "roas" || metric === "frequency";
+  function fmtMetric(v) {
+    if (isMoney) return money(v);
+    if (isDecimal) return (v || 0).toFixed(2);
+    return num(v);
+  }
   const campBarData = {
     labels: camps.map((c) => c.name.length > 38 ? c.name.slice(0, 36) + "…" : c.name),
     datasets: [{
@@ -152,9 +191,7 @@ export default function Charts({ clients, campaigns, datePreset, metaToken }) {
         callbacks: {
           label: (ctx) => {
             const c = camps[ctx.dataIndex];
-            const v = ctx.parsed.x;
-            const main = isMoney ? money(v) : metric === "roas" ? v.toFixed(2) : num(v);
-            return ` ${main} · ${c.client}`;
+            return ` ${fmtMetric(ctx.parsed.x)} · ${c.client}`;
           },
         },
       },
@@ -165,6 +202,82 @@ export default function Charts({ clients, campaigns, datePreset, metaToken }) {
         grid: { color: "#2a3242" },
       },
       y: { ticks: { color: "#e6e9ef", font: { size: 11 } }, grid: { display: false } },
+    },
+  };
+
+  // ---- Alcance + Frequencia por cliente (barra + linha)
+  const reachData = {
+    labels: byClient.map((c) => c.name),
+    datasets: [
+      {
+        label: "Alcance", data: byClient.map((c) => c.reach),
+        backgroundColor: "#a371f7", yAxisID: "y",
+      },
+      {
+        label: "Frequência", data: byClient.map((c) => c.frequency),
+        type: "line", borderColor: "#d29922", backgroundColor: "#d29922",
+        tension: 0.3, pointRadius: 4, yAxisID: "y2",
+      },
+    ],
+  };
+  const reachOpts = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: "#e6e9ef" } },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => ctx.dataset.label === "Frequência"
+            ? ` ${ctx.parsed.y.toFixed(2)}× por pessoa`
+            : ` ${num(ctx.parsed.y)} pessoas`,
+        },
+      },
+    },
+    scales: {
+      x: { ticks: { color: "#8b94a7", maxRotation: 45, minRotation: 30 }, grid: { color: "#2a3242" } },
+      y: { ticks: { color: "#8b94a7", callback: (v) => num(v) }, grid: { color: "#2a3242" } },
+      y2: { position: "right", ticks: { color: "#d29922" }, grid: { display: false }, beginAtZero: true },
+    },
+  };
+
+  // ---- Funil de eficiencia (impressoes -> alcance -> cliques link -> resultados)
+  const funnel = useMemo(() => {
+    const pool = clientFilter === "ALL"
+      ? campaigns
+      : campaigns.filter((c) => c.client === clientFilter);
+    return {
+      impressions: pool.reduce((s, c) => s + (c.impressions || 0), 0),
+      reach: pool.reduce((s, c) => s + (c.reach || 0), 0),
+      link_clicks: pool.reduce((s, c) => s + (c.link_clicks || 0), 0),
+      results: pool.reduce((s, c) => s + (c.results || 0), 0),
+    };
+  }, [campaigns, clientFilter]);
+
+  const funnelData = {
+    labels: ["Impressões", "Alcance", "Cliques no link", "Resultados"],
+    datasets: [{
+      label: "Volume",
+      data: [funnel.impressions, funnel.reach, funnel.link_clicks, funnel.results],
+      backgroundColor: ["#4c8dff", "#a371f7", "#56d4dd", "#3fb950"],
+    }],
+  };
+  const funnelOpts = {
+    indexAxis: "y",
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => {
+            const base = funnel.impressions || 1;
+            const p = (ctx.parsed.x / base * 100).toFixed(1);
+            return ` ${num(ctx.parsed.x)} · ${p}% de impressões`;
+          },
+        },
+      },
+    },
+    scales: {
+      x: { ticks: { color: "#8b94a7", callback: (v) => num(v) }, grid: { color: "#2a3242" } },
+      y: { ticks: { color: "#e6e9ef", font: { size: 12 } }, grid: { display: false } },
     },
   };
 
@@ -264,6 +377,12 @@ export default function Charts({ clients, campaigns, datePreset, metaToken }) {
               <option value="roas">ROAS</option>
               <option value="purchases">Compras</option>
               <option value="clicks">Cliques</option>
+              <option value="link_clicks">Cliques no link</option>
+              <option value="reach">Alcance</option>
+              <option value="results">Resultados</option>
+              <option value="cost_per_result">Custo por resultado</option>
+              <option value="cpm">CPM</option>
+              <option value="frequency">Frequência</option>
             </select>
           </div>
           <div className="field field-sm">
@@ -283,6 +402,9 @@ export default function Charts({ clients, campaigns, datePreset, metaToken }) {
           </div>
           <button className="btn-ghost" onClick={loadTrend} disabled={trendLoading}>
             Carregar tendência diária
+          </button>
+          <button className="btn-primary" onClick={exportChartsPdf} disabled={!clients.length}>
+            📄 Baixar PDF dos gráficos
           </button>
         </div>
       </section>
@@ -306,6 +428,23 @@ export default function Charts({ clients, campaigns, datePreset, metaToken }) {
           <div className="chart-wrap chart-wrap-tall">
             <Bar data={campBarData} options={campBarOpts} />
           </div>
+        </section>
+
+        <section className="panel chart-panel">
+          <h2>Alcance × Frequência</h2>
+          <p className="panel-hint">
+            Pessoas únicas atingidas (barra) e média de vezes que cada pessoa viu o anúncio (linha).
+          </p>
+          <div className="chart-wrap"><Bar data={reachData} options={reachOpts} /></div>
+        </section>
+
+        <section className="panel chart-panel">
+          <h2>Funil de eficiência</h2>
+          <p className="panel-hint">
+            Impressões → Alcance → Cliques no link → Resultados
+            {clientFilter !== "ALL" ? ` · cliente ${clientFilter}` : " · todos os clientes"}.
+          </p>
+          <div className="chart-wrap"><Bar data={funnelData} options={funnelOpts} /></div>
         </section>
 
         <section className="panel chart-panel wide">

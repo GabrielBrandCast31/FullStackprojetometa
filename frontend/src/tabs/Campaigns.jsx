@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { money, num, roasClass } from "../lib/format.js";
+import { money, num, roasClass, cpaClass, cpaMedian } from "../lib/format.js";
+import { generateCampaignsReport } from "../lib/report.js";
 
 function StatusTag({ status }) {
   if (status === "ACTIVE") return <span className="tag tag-active">Ativa</span>;
@@ -11,7 +12,7 @@ function StatusTag({ status }) {
   return <span className="tag tag-other">{label}</span>;
 }
 
-export default function Campaigns({ campaigns, clients, prefilter, onPrefilterConsumed }) {
+export default function Campaigns({ campaigns, clients, prefilter, onPrefilterConsumed, datePreset, setStatus }) {
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
   const [clientFilter, setClientFilter] = useState("ALL");
   const [search, setSearch] = useState("");
@@ -40,6 +41,9 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
       return true;
     }).sort((a, b) => b.spend - a.spend);
   }, [campaigns, statusFilter, clientFilter, search]);
+
+  // Mediana dos CPAs (>0) das campanhas filtradas — usada pra destacar os baixos.
+  const cpaRef = useMemo(() => cpaMedian(filtered, "cost_per_result"), [filtered]);
 
   return (
     <section id="view-campaigns" className="view">
@@ -75,6 +79,17 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
         <span className="filter-count">
           {filtered.length} de {campaigns.length} campanhas
         </span>
+        <button
+          className="btn-primary"
+          onClick={() => generateCampaignsReport({
+            campaigns: filtered, clients, datePreset,
+            filters: { statusFilter, clientFilter, search },
+            onError: (msg) => setStatus && setStatus({ msg, type: "error" }),
+          })}
+          disabled={!filtered.length}
+        >
+          📄 Baixar PDF
+        </button>
       </section>
 
       <section className="panel table-panel">
@@ -84,16 +99,19 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
             <thead>
               <tr>
                 <th>Campanha</th><th>Cliente</th><th>Status</th>
-                <th>Orçamento</th><th>Investido</th><th>Impressões</th>
-                <th>Cliques</th><th>CTR</th><th>Conv.</th>
-                <th>Resultados</th><th>Compras</th><th>Receita</th>
-                <th>ROAS</th><th>CPA</th>
+                <th>Atrib.</th><th>Término</th>
+                <th>Orçamento</th><th>Investido</th>
+                <th>Impressões</th><th>Alcance</th><th>Freq.</th>
+                <th>Cliques</th><th>Cliques link</th>
+                <th>CTR</th><th>CPM</th>
+                <th>Conversões</th><th>Custo/Conv.</th>
+                <th>Receita</th><th>ROAS</th>
               </tr>
             </thead>
             <tbody>
               {!filtered.length && (
                 <tr className="empty-row">
-                  <td colSpan={14}>Nenhuma campanha para os filtros selecionados.</td>
+                  <td colSpan={18}>Nenhuma campanha para os filtros selecionados.</td>
                 </tr>
               )}
               {filtered.map((c) => (
@@ -101,6 +119,8 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
                   <td>{c.name}</td>
                   <td>{c.client}</td>
                   <td><StatusTag status={c.status} /></td>
+                  <td><small>{c.attribution_setting || "—"}</small></td>
+                  <td><small>{c.stop_time ? new Date(c.stop_time).toLocaleDateString("pt-BR") : "—"}</small></td>
                   <td>
                     {c.budget
                       ? <>{money(c.budget, c.currency)} <small>{c.budget_type}</small></>
@@ -108,14 +128,18 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
                   </td>
                   <td>{money(c.spend, c.currency)}</td>
                   <td>{num(c.impressions)}</td>
+                  <td>{num(c.reach)}</td>
+                  <td>{(c.frequency || 0).toFixed(2)}</td>
                   <td>{num(c.clicks)}</td>
+                  <td>{num(c.link_clicks)}</td>
                   <td>{c.ctr.toFixed(2)}%</td>
-                  <td>{c.conv_rate.toFixed(1)}%</td>
+                  <td>{c.cpm ? money(c.cpm, c.currency) : "—"}</td>
                   <td>{num(c.results)} <small>{c.results_label}</small></td>
-                  <td>{num(c.purchases)}</td>
+                  <td className={cpaClass(c.cost_per_result, cpaRef)}>
+                    {c.cost_per_result ? money(c.cost_per_result, c.currency) : "—"}
+                  </td>
                   <td>{money(c.revenue, c.currency)}</td>
                   <td className={roasClass(c.roas)}>{c.roas.toFixed(2)}</td>
-                  <td>{c.cpa ? money(c.cpa, c.currency) : "—"}</td>
                 </tr>
               ))}
             </tbody>
