@@ -9,25 +9,43 @@ import brandcastLogoUrl from "../assets/brandcastlogo.png";
 // e injeta no shell compartilhado (cabeçalho, título, rodapé, CSS).
 // ============================================================================
 
-// Logo da Agência Brandcast — convertida pra data URI base64 na primeira
-// chamada e cacheada em memória. Necessário porque o relatório é aberto em
-// uma janela com URL `blob:` (origin null em alguns navegadores), e caminhos
-// relativos como `/assets/brandcastlogo.png` não resolvem nesse contexto.
+// Logo da Agência Brandcast — convertida pra data URI base64 (PNG) usando
+// <img> + canvas. Cacheada em memória. Necessário porque o relatório é
+// aberto em uma janela com URL `blob:`, onde caminhos relativos como
+// `/assets/brandcastlogo.png` não resolvem.
+// Carregar via Image (em vez de fetch) é mais robusto e também permite
+// redimensionar antes de codificar, deixando o data URI pequeno (~50KB).
 let _logoDataUriCache = null;
 async function getBrandLogoDataUri() {
   if (_logoDataUriCache) return _logoDataUriCache;
   try {
-    const resp = await fetch(brandcastLogoUrl);
-    const blob = await resp.blob();
-    _logoDataUriCache = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+    const dataUri = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        // Redimensiona pra altura máxima 160px mantendo proporção.
+        const targetH = 160;
+        const scale = Math.min(1, targetH / img.naturalHeight);
+        const w = Math.round(img.naturalWidth * scale);
+        const h = Math.round(img.naturalHeight * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          resolve(canvas.toDataURL("image/png"));
+        } catch (e) {
+          reject(e);
+        }
+      };
+      img.onerror = (e) => reject(e || new Error("img load failed"));
+      img.src = brandcastLogoUrl;
     });
-  } catch {
-    // Fallback: usa a URL relativa direta (pode não renderizar no blob window).
-    _logoDataUriCache = brandcastLogoUrl;
+    _logoDataUriCache = dataUri;
+  } catch (e) {
+    console.warn("[report] falha ao carregar logo:", e);
+    _logoDataUriCache = brandcastLogoUrl; // fallback (pode não renderizar)
   }
   return _logoDataUriCache;
 }
@@ -223,7 +241,8 @@ function buildInteractiveDashboards(camps, currency) {
   const sorted = [...camps].sort((a, b) => b.spend - a.spend);
   const top = sorted.slice(0, 8);
   const restSum = sorted.slice(8).reduce((s, c) => s + c.spend, 0);
-  const donutLabels = top.map((c) => c.name);
+  // Trunca pra não fazer a legenda ficar enorme e empurrar o donut pra fora.
+  const donutLabels = top.map((c) => c.name.length > 26 ? c.name.slice(0, 24) + "…" : c.name);
   const donutData = top.map((c) => c.spend);
   if (restSum > 0) { donutLabels.push("Outros"); donutData.push(restSum); }
 
@@ -301,13 +320,21 @@ function buildInteractiveDashboards(camps, currency) {
       Chart.defaults.color = TEXT;
       Chart.defaults.font.family = 'Inter, -apple-system, sans-serif';
       Chart.defaults.font.size = 11;
+
+      // Coleta os charts criados pra forçar resize antes de imprimir
+      // (o grid muda de 2col → 1col em @media print).
+      var _charts = [];
+      function track(c) { _charts.push(c); return c; }
+      window.addEventListener('beforeprint', function () {
+        _charts.forEach(function (c) { try { c.resize(); } catch (e) {} });
+      });
       var moneyFmt = function (v) {
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: DATA.currency }).format(v || 0);
       };
       var numFmt = function (v) { return new Intl.NumberFormat('pt-BR').format(Math.round(v || 0)); };
 
-      // Donut
-      new Chart(document.getElementById('dashDonut'), {
+      // Donut — legenda em baixo pra não estreitar o gráfico.
+      track(new Chart(document.getElementById('dashDonut'), {
         type: 'doughnut',
         data: {
           labels: DATA.donut.labels,
@@ -320,7 +347,10 @@ function buildInteractiveDashboards(camps, currency) {
         options: {
           responsive: true, maintainAspectRatio: false, animation: false,
           plugins: {
-            legend: { position: 'right', labels: { color: TEXT, font: { size: 10 } } },
+            legend: {
+              position: 'bottom',
+              labels: { color: TEXT, font: { size: 10 }, boxWidth: 12, padding: 8 },
+            },
             tooltip: { callbacks: { label: function (ctx) {
               var total = ctx.dataset.data.reduce(function (s, v) { return s + v; }, 0);
               var p = total ? (ctx.parsed / total * 100).toFixed(1) : 0;
@@ -328,10 +358,10 @@ function buildInteractiveDashboards(camps, currency) {
             } } },
           },
         },
-      });
+      }));
 
       // Funil
-      new Chart(document.getElementById('dashFunnel'), {
+      track(new Chart(document.getElementById('dashFunnel'), {
         type: 'bar',
         data: {
           labels: DATA.funnel.labels,
@@ -357,10 +387,10 @@ function buildInteractiveDashboards(camps, currency) {
             y: { ticks: { color: TEXT }, grid: { display: false } },
           },
         },
-      });
+      }));
 
       // ROAS
-      new Chart(document.getElementById('dashRoas'), {
+      track(new Chart(document.getElementById('dashRoas'), {
         type: 'bar',
         data: {
           labels: DATA.roas.labels,
@@ -383,12 +413,12 @@ function buildInteractiveDashboards(camps, currency) {
             y: { ticks: { color: MUTED }, grid: { color: GRID }, beginAtZero: true },
           },
         },
-      });
+      }));
 
       // CPA (custo por conversão — menores primeiro)
       var cpaEl = document.getElementById('dashCpa');
       if (cpaEl && DATA.cpa.data.length) {
-        new Chart(cpaEl, {
+        track(new Chart(cpaEl, {
           type: 'bar',
           data: {
             labels: DATA.cpa.labels,
@@ -411,7 +441,7 @@ function buildInteractiveDashboards(camps, currency) {
               y: { ticks: { color: TEXT, font: { size: 10 } }, grid: { display: false } },
             },
           },
-        });
+        }));
       } else if (cpaEl) {
         cpaEl.parentElement.innerHTML = '<div style="color:' + MUTED + ';font-size:11px;padding:20px;text-align:center;">Sem conversões registradas no período.</div>';
       }
@@ -1214,9 +1244,22 @@ const REPORT_CSS = `
 
   /* Print */
   @media print {
-    body { padding: 14mm; }
+    body { padding: 12mm 10mm; }
     .rpt-actions { display: none; }
-    .rpt-status, .rpt-kpis, .rpt-insight, .rpt-table-wrap, .rpt-chart-card { page-break-inside: avoid; }
+    .rpt-status, .rpt-kpis, .rpt-insight, .rpt-table-wrap, .rpt-chart-card,
+    .rpt-dash-card { page-break-inside: avoid; }
+    /* Gráficos: 1 coluna pra caber no A4 portrait sem corte. */
+    .rpt-dash-grid { grid-template-columns: 1fr !important; gap: 10px; }
+    .rpt-dash-card.wide,
+    .rpt-dash-card { grid-column: 1 / -1 !important; }
+    .rpt-canvas-wrap { height: 200px !important; }
+    .rpt-canvas-tall { height: 240px !important; }
+    /* KPIs: continua 4 colunas mas mais apertado. */
+    .rpt-kpi { padding: 12px 14px; min-height: 80px; }
+    .rpt-kpi-value { font-size: 24px; }
+    /* Tabela ocupa toda a largura sem overflow. */
+    .rpt-table { table-layout: auto; font-size: 9.5px; }
+    .rpt-table th, .rpt-table td { padding: 8px 6px; }
   }
-  @page { size: A4; margin: 0; }
+  @page { size: A4 portrait; margin: 0; }
 `;
