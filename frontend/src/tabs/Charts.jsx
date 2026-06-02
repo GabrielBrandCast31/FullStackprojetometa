@@ -183,7 +183,6 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
     }],
   };
   const campBarOpts = {
-    indexAxis: "y",
     responsive: true, maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
@@ -191,17 +190,21 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
         callbacks: {
           label: (ctx) => {
             const c = camps[ctx.dataIndex];
-            return ` ${fmtMetric(ctx.parsed.x)} · ${c.client}`;
+            return ` ${fmtMetric(ctx.parsed.y)} · ${c.client}`;
           },
         },
       },
     },
     scales: {
       x: {
-        ticks: { color: "#8b94a7", callback: (v) => isMoney ? fmtBRLAxis(v) : v },
-        grid: { color: "#2a3242" },
+        ticks: { color: "#e6e9ef", font: { size: 10 }, autoSkip: false,
+                 maxRotation: 50, minRotation: 35 },
+        grid: { display: false },
       },
-      y: { ticks: { color: "#e6e9ef", font: { size: 11 } }, grid: { display: false } },
+      y: {
+        ticks: { color: "#8b94a7", callback: (v) => isMoney ? fmtBRLAxis(v) : v },
+        grid: { color: "#2a3242" }, beginAtZero: true,
+      },
     },
   };
 
@@ -261,7 +264,6 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
     }],
   };
   const funnelOpts = {
-    indexAxis: "y",
     responsive: true, maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
@@ -269,15 +271,16 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
         callbacks: {
           label: (ctx) => {
             const base = funnel.impressions || 1;
-            const p = (ctx.parsed.x / base * 100).toFixed(1);
-            return ` ${num(ctx.parsed.x)} · ${p}% de impressões`;
+            const p = (ctx.parsed.y / base * 100).toFixed(1);
+            return ` ${num(ctx.parsed.y)} · ${p}% de impressões`;
           },
         },
       },
     },
     scales: {
-      x: { ticks: { color: "#8b94a7", callback: (v) => num(v) }, grid: { color: "#2a3242" } },
-      y: { ticks: { color: "#e6e9ef", font: { size: 12 } }, grid: { display: false } },
+      x: { ticks: { color: "#e6e9ef", font: { size: 12 } }, grid: { display: false } },
+      y: { ticks: { color: "#8b94a7", callback: (v) => num(v) },
+           grid: { color: "#2a3242" }, beginAtZero: true },
     },
   };
 

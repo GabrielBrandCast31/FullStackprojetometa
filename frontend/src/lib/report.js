@@ -392,19 +392,19 @@ function buildInteractiveDashboards(camps, currency) {
           }],
         },
         options: {
-          indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false,
+          responsive: true, maintainAspectRatio: false, animation: false,
           plugins: {
             legend: { display: false },
             tooltip: { callbacks: { label: function (ctx) {
               var base = DATA.funnel.data[0] || 1;
-              var p = (ctx.parsed.x / base * 100).toFixed(1);
-              return ' ' + numFmt(ctx.parsed.x) + ' · ' + p + '% de impressões';
+              var p = (ctx.parsed.y / base * 100).toFixed(1);
+              return ' ' + numFmt(ctx.parsed.y) + ' · ' + p + '% de impressões';
             } } },
           },
           scales: {
-            x: { ticks: { color: MUTED, callback: function (v) { return numFmt(v); } },
-                 grid: { color: GRID } },
-            y: { ticks: { color: TEXT }, grid: { display: false } },
+            x: { ticks: { color: TEXT }, grid: { display: false } },
+            y: { ticks: { color: MUTED, callback: function (v) { return numFmt(v); } },
+                 grid: { color: GRID }, beginAtZero: true },
           },
         },
       }));
@@ -448,17 +448,19 @@ function buildInteractiveDashboards(camps, currency) {
             }],
           },
           options: {
-            indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false,
+            responsive: true, maintainAspectRatio: false, animation: false,
             plugins: {
               legend: { display: false },
               tooltip: { callbacks: { label: function (ctx) {
-                return ' ' + moneyFmt(ctx.parsed.x) + ' por conversão';
+                return ' ' + moneyFmt(ctx.parsed.y) + ' por conversão';
               } } },
             },
             scales: {
-              x: { ticks: { color: MUTED, callback: function (v) { return moneyFmt(v); } },
-                   grid: { color: GRID } },
-              y: { ticks: { color: TEXT, font: { size: 10 } }, grid: { display: false } },
+              x: { ticks: { color: TEXT, font: { size: 9 }, autoSkip: false,
+                            maxRotation: 50, minRotation: 35 },
+                   grid: { display: false } },
+              y: { ticks: { color: MUTED, callback: function (v) { return moneyFmt(v); } },
+                   grid: { color: GRID }, beginAtZero: true },
             },
           },
         }));
