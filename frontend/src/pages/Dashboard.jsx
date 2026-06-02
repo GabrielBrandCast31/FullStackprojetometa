@@ -11,11 +11,13 @@ import Clients from "../tabs/Clients.jsx";
 import Campaigns from "../tabs/Campaigns.jsx";
 import Charts from "../tabs/Charts.jsx";
 import NewCampaign from "../tabs/NewCampaign.jsx";
+import SaldoAlerts from "../tabs/SaldoAlerts.jsx";
 import BrandLogo from "../components/BrandLogo.jsx";
 
 const TABS = [
   ["overview", "Visão Geral", "📊"],
   ["clients", "Clientes", "👥"],
+  ["saldo", "Alertas de saldo", "🔔"],
   ["campaigns", "Campanhas", "🎯"],
   ["charts", "Gráficos", "📈"],
   ["new-campaign", "Nova campanha", "➕"],
@@ -220,6 +222,7 @@ export default function Dashboard() {
           <main id="dashboard">
             {view === "overview"     && <Overview {...sharedProps} aiEnabled={aiEnabled} />}
             {view === "clients"      && <Clients {...sharedProps} />}
+            {view === "saldo"        && <SaldoAlerts {...sharedProps} />}
             {view === "campaigns"    && <Campaigns {...sharedProps}
                                           prefilter={campaignsPrefilter}
                                           onPrefilterConsumed={() => setCampaignsPrefilter(null)} />}

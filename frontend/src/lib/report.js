@@ -86,10 +86,10 @@ function statusBadge(status) {
   return `<span class="rpt-pill rpt-pill-muted">${esc(s || "—")}</span>`;
 }
 
-// Card de KPI: label / valor / subtítulo.
-function kpiCard(label, value, sub) {
+// Card de KPI: label / valor / subtítulo. Classe extra opcional pra destaque.
+function kpiCard(label, value, sub, extraClass = "") {
   return `
-    <div class="rpt-kpi">
+    <div class="rpt-kpi ${extraClass}">
       <div class="rpt-kpi-label">${esc(label)}</div>
       <div class="rpt-kpi-value">${value}</div>
       <div class="rpt-kpi-sub">${esc(sub)}</div>
@@ -153,20 +153,38 @@ function buildInsight(campaigns) {
 function aggregate(campaigns) {
   const tSpend = campaigns.reduce((s, c) => s + c.spend, 0);
   const tRevenue = campaigns.reduce((s, c) => s + c.revenue, 0);
-  const tConversions = campaigns.reduce((s, c) => s + (c.results || 0), 0);
+  const tResults = campaigns.reduce((s, c) => s + (c.results || 0), 0);
+  const tConversations = campaigns.reduce((s, c) => s + (c.conversations || 0), 0);
   const tImpressions = campaigns.reduce((s, c) => s + c.impressions, 0);
+  const tReach = campaigns.reduce((s, c) => s + (c.reach || 0), 0);
   const tClicks = campaigns.reduce((s, c) => s + c.clicks, 0);
+  const tLinkClicks = campaigns.reduce((s, c) => s + (c.link_clicks || 0), 0);
   const tActive = campaigns.filter((c) => c.status === "ACTIVE").length;
   return {
-    tSpend, tRevenue, tConversions, tImpressions, tClicks, tActive,
+    tSpend, tRevenue, tResults, tConversations,
+    tImpressions, tReach, tClicks, tLinkClicks, tActive,
     roas: tSpend ? tRevenue / tSpend : 0,
     ctr: tImpressions ? (tClicks / tImpressions) * 100 : 0,
-    cpa: tConversions ? tSpend / tConversions : 0,
+    cpa: tResults ? tSpend / tResults : 0,
+    cpc_conv: tConversations ? tSpend / tConversations : 0,
   };
 }
 
-// Bloco "Resultado Consolidado" + "Engajamento" (8 KPIs, dois grids).
+// Bloco "MÉTRICAS PRINCIPAIS" (destaque) + "RESULTADO CONSOLIDADO" + "ENGAJAMENTO".
 function buildKpisBlocks(agg, currency = "BRL") {
+  // Métricas principais (destaque visual via classe rpt-kpi-main).
+  const kpisPrincipais = [
+    kpiCard("RESULTADOS", num(agg.tResults), "conversões registradas", "rpt-kpi-main"),
+    kpiCard("CUSTO POR RESULTADO",
+      agg.cpa ? money(agg.cpa, currency) : `<span class="rpt-neg">—</span>`,
+      agg.cpa ? "menor é melhor" : "sem conversões", "rpt-kpi-main"),
+    kpiCard("CONVERSAS INICIADAS", num(agg.tConversations),
+      agg.tConversations ? "novos contatos" : "sem conversas registradas", "rpt-kpi-main"),
+    kpiCard("CUSTO POR CONVERSA",
+      agg.cpc_conv ? money(agg.cpc_conv, currency) : `<span class="rpt-neg">—</span>`,
+      agg.cpc_conv ? "menor é melhor" : "sem conversas", "rpt-kpi-main"),
+  ].join("");
+
   const kpisResultado = [
     kpiCard("INVESTIDO", money(agg.tSpend, currency), "total no período"),
     kpiCard("RECEITA",
@@ -175,21 +193,23 @@ function buildKpisBlocks(agg, currency = "BRL") {
     kpiCard("ROAS",
       `<span class="${agg.roas < 1 ? "rpt-neg" : ""}">${agg.roas.toFixed(2).replace(".", ",")}<span class="rpt-x">×</span></span>`,
       agg.roas === 0 ? "retorno não apurado" : "retorno sobre investimento"),
-    kpiCard("CONVERSÕES", num(agg.tConversions), "no período"),
+    kpiCard("ALCANCE", num(agg.tReach), "pessoas únicas"),
   ].join("");
 
   const kpisEngaj = [
     kpiCard("IMPRESSÕES", num(agg.tImpressions), "exibições totais"),
-    kpiCard("CLIQUES", num(agg.tClicks), "interações em anúncios"),
+    kpiCard("CLIQUES", num(agg.tClicks),
+      agg.tLinkClicks ? `${num(agg.tLinkClicks)} no link` : "interações em anúncios"),
     kpiCard("CTR",
       `${agg.ctr.toFixed(2).replace(".", ",")}<span class="rpt-pcent">%</span>`,
       agg.ctr >= 1 ? "taxa de cliques saudável" : "taxa de cliques baixa"),
-    kpiCard("CUSTO POR CONVERSÃO",
-      agg.cpa ? money(agg.cpa, currency) : `<span class="rpt-neg">—</span>`,
-      agg.cpa ? "menor é melhor" : "sem conversões registradas"),
+    kpiCard("CLIQUES NO LINK", num(agg.tLinkClicks), "tráfego pra fora"),
   ].join("");
 
   return `
+    <div class="rpt-section-title">MÉTRICAS PRINCIPAIS</div>
+    <div class="rpt-kpis">${kpisPrincipais}</div>
+
     <div class="rpt-section-title">RESULTADO CONSOLIDADO</div>
     <div class="rpt-kpis">${kpisResultado}</div>
 
@@ -643,7 +663,10 @@ export async function generateReport({ clients, accountId, datePreset, manualSal
           <td>${orc}</td>
           <td>${money(c.spend, currency)}</td>
           <td>${num(c.impressions)}</td>
-          <td>${num(c.clicks)}</td>
+          <td>
+            ${num(c.clicks)}
+            ${c.link_clicks ? `<div class="rpt-cell-sub">${num(c.link_clicks)} no link</div>` : ""}
+          </td>
           <td>${c.ctr.toFixed(2).replace(".", ",")}%</td>
           <td>${num(c.results)}</td>
           <td>${money(c.revenue, currency)}</td>
@@ -682,7 +705,12 @@ export async function generateReport({ clients, accountId, datePreset, manualSal
           <td>${num(s.total_campaigns)} <span class="rpt-cell-sub-inline">(${num(s.active_campaigns)})</span></td>
           <td>${money(s.total_spend, cl.currency)}</td>
           <td>${num(s.total_impressions)}</td>
-          <td>${num(s.total_clicks)}</td>
+          <td>
+            ${num(s.total_clicks)}
+            ${(cl.campaigns || []).reduce((sum, c) => sum + (c.link_clicks || 0), 0)
+              ? `<div class="rpt-cell-sub">${num((cl.campaigns || []).reduce((sum, c) => sum + (c.link_clicks || 0), 0))} no link</div>`
+              : ""}
+          </td>
           <td>${s.avg_ctr.toFixed(2).replace(".", ",")}%</td>
           <td>${num((cl.campaigns || []).reduce((sum, c) => sum + (c.results || 0), 0))}</td>
           <td>${money(s.total_revenue, cl.currency)}</td>
@@ -823,7 +851,10 @@ export async function generateCampaignsReport({ campaigns, clients, datePreset, 
           <td class="rpt-col-center">${statusBadge(c.status)}</td>
           <td>${money(c.spend, c.currency)}</td>
           <td>${num(c.impressions)}</td>
-          <td>${num(c.clicks)}</td>
+          <td>
+            ${num(c.clicks)}
+            ${c.link_clicks ? `<div class="rpt-cell-sub">${num(c.link_clicks)} no link</div>` : ""}
+          </td>
           <td>${c.ctr.toFixed(2).replace(".", ",")}%</td>
           <td>${num(c.results)}</td>
           <td>${cpaCell}</td>
@@ -840,7 +871,10 @@ export async function generateCampaignsReport({ campaigns, clients, datePreset, 
         <td>${orc}</td>
         <td>${money(c.spend, c.currency)}</td>
         <td>${num(c.impressions)}</td>
-        <td>${num(c.clicks)}</td>
+        <td>
+          ${num(c.clicks)}
+          ${c.link_clicks ? `<div class="rpt-cell-sub">${num(c.link_clicks)} no link</div>` : ""}
+        </td>
         <td>${c.ctr.toFixed(2).replace(".", ",")}%</td>
         <td>${num(c.results)}</td>
         <td>${cpaCell}</td>
@@ -1093,6 +1127,17 @@ const REPORT_CSS = `
     font-family: "IBM Plex Mono", monospace; font-size: 9.5px;
     color: var(--gold); letter-spacing: 0.3px; margin-top: auto;
   }
+
+  /* KPIs principais (destaque): borda dourada, valor maior, fundo gradiente. */
+  .rpt-kpi.rpt-kpi-main {
+    background: linear-gradient(160deg, rgba(201,152,90,0.16) 0%, var(--card) 70%);
+    border-color: rgba(201,152,90,0.45);
+    border-left: 3px solid var(--gold);
+    min-height: 110px;
+  }
+  .rpt-kpi.rpt-kpi-main .rpt-kpi-label { color: var(--gold); font-weight: 700; }
+  .rpt-kpi.rpt-kpi-main .rpt-kpi-value { font-size: 34px; color: #ffffff; }
+  .rpt-kpi.rpt-kpi-main .rpt-kpi-sub { color: var(--text); }
 
   /* Insight box */
   .rpt-insight {

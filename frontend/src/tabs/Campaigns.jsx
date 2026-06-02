@@ -44,6 +44,7 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
 
   // Mediana dos CPAs (>0) das campanhas filtradas — usada pra destacar os baixos.
   const cpaRef = useMemo(() => cpaMedian(filtered, "cost_per_result"), [filtered]);
+  const convCpaRef = useMemo(() => cpaMedian(filtered, "cost_per_conversation"), [filtered]);
 
   return (
     <section id="view-campaigns" className="view">
@@ -99,12 +100,12 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
             <thead>
               <tr>
                 <th>Campanha</th><th>Cliente</th><th>Status</th>
-                <th>Atrib.</th><th>Término</th>
                 <th>Orçamento</th><th>Investido</th>
                 <th>Impressões</th><th>Alcance</th><th>Freq.</th>
                 <th>Cliques</th><th>Cliques link</th>
                 <th>CTR</th><th>CPM</th>
-                <th>Conversões</th><th>Custo/Conv.</th>
+                <th>Resultados</th><th>Custo/Result.</th>
+                <th>Conversas</th><th>Custo/Conversa</th>
                 <th>Receita</th><th>ROAS</th>
               </tr>
             </thead>
@@ -119,8 +120,6 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
                   <td>{c.name}</td>
                   <td>{c.client}</td>
                   <td><StatusTag status={c.status} /></td>
-                  <td><small>{c.attribution_setting || "—"}</small></td>
-                  <td><small>{c.stop_time ? new Date(c.stop_time).toLocaleDateString("pt-BR") : "—"}</small></td>
                   <td>
                     {c.budget
                       ? <>{money(c.budget, c.currency)} <small>{c.budget_type}</small></>
@@ -137,6 +136,10 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
                   <td>{num(c.results)} <small>{c.results_label}</small></td>
                   <td className={cpaClass(c.cost_per_result, cpaRef)}>
                     {c.cost_per_result ? money(c.cost_per_result, c.currency) : "—"}
+                  </td>
+                  <td>{num(c.conversations)}</td>
+                  <td className={cpaClass(c.cost_per_conversation, convCpaRef)}>
+                    {c.cost_per_conversation ? money(c.cost_per_conversation, c.currency) : "—"}
                   </td>
                   <td>{money(c.revenue, c.currency)}</td>
                   <td className={roasClass(c.roas)}>{c.roas.toFixed(2)}</td>

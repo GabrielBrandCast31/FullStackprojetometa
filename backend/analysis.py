@@ -19,6 +19,13 @@ LEAD_TYPES = [
     "offsite_conversion.fk_lead",
     "onsite_conversion.lead_grouped",
 ]
+# Tipos de acao do Meta que representam "conversa iniciada" (WhatsApp/Messenger).
+# Comum em campanhas com objetivo de mensagens.
+CONVERSATION_TYPES = [
+    "onsite_conversion.messaging_conversation_started_7d",
+    "messaging_conversation_started_7d",
+    "onsite_conversion.total_messaging_connection",
+]
 # Separadores usados para extrair o "cliente" do nome da campanha.
 SEPARATORS = [" | ", " - ", " — ", " – ", " :: ", " > "]
 
@@ -71,6 +78,7 @@ def build_campaigns(raw_campaigns: list[dict], raw_insights: list[dict]) -> list
         purchases = _action_value(actions, PURCHASE_TYPES)
         leads = _action_value(actions, LEAD_TYPES)
         link_clicks = _action_value(actions, ["link_click"])
+        conversations = _action_value(actions, CONVERSATION_TYPES)
         revenue = _action_value(action_values, PURCHASE_TYPES)
 
         roas_list = ins.get("purchase_roas") or []
@@ -89,15 +97,18 @@ def build_campaigns(raw_campaigns: list[dict], raw_insights: list[dict]) -> list
         else:
             budget, budget_type = 0.0, "Por conjunto"
 
-        # "Resultados": usa a conversao principal disponivel.
+        # "Resultados" = conversoes reais (compras > leads). Sem isso, fica zero.
+        # `link_clicks` segue exposto separadamente — nao entra como fallback aqui
+        # para nao inflar artificialmente a metrica de conversao.
         if purchases:
             results, results_label = purchases, "Compras"
         elif leads:
             results, results_label = leads, "Leads"
         else:
-            results, results_label = link_clicks, "Cliques no link"
+            results, results_label = 0.0, "—"
 
         cpa = spend / results if results else 0.0
+        cost_per_conversation = spend / conversations if conversations else 0.0
         # Taxa de conversao: resultados sobre cliques (proxy de eficiencia do funil).
         conv_rate = results / clicks * 100 if (clicks := int(_to_float(ins.get("clicks")))) else 0.0
 
@@ -122,6 +133,8 @@ def build_campaigns(raw_campaigns: list[dict], raw_insights: list[dict]) -> list
             "cpm": round(_to_float(ins.get("cpm")), 2),
             "purchases": round(purchases, 2),
             "leads": round(leads, 2),
+            "conversations": round(conversations, 2),
+            "cost_per_conversation": round(cost_per_conversation, 2),
             "revenue": round(revenue, 2),
             "roas": round(roas, 2),
             "results": round(results, 2),

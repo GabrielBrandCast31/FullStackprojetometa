@@ -260,6 +260,25 @@ textarea { resize: vertical; }
 .kpi .value.yellow { color: var(--yellow); }
 .kpi .value.red { color: var(--red); }
 
+/* KPIs principais (destaque): gradiente roxo + valor maior. */
+.kpi-grid-main { margin-bottom: 8px; }
+.kpi.kpi-highlight {
+  background: linear-gradient(160deg, rgba(109,40,217,0.22) 0%, var(--panel) 60%);
+  border-color: rgba(139,92,246,0.45);
+  box-shadow: 0 0 0 1px rgba(139,92,246,0.15);
+}
+.kpi.kpi-highlight .label {
+  color: #c4b5fd;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+}
+.kpi.kpi-highlight .value {
+  font-size: 32px;
+  color: #ffffff;
+}
+
 /* Grade de mini-painéis (visão geral) */
 .panel-grid {
   display: grid;
@@ -309,7 +328,8 @@ textarea { resize: vertical; }
 .critical-card:hover { border-color: var(--accent); }
 .critical-card.critical { border-left-color: var(--red); }
 .critical-card.warn { border-left-color: var(--yellow); }
-.critical-card.unknown { border-left-color: var(--muted); cursor: default; }
+.critical-card.ok { border-left-color: var(--green); }
+.critical-card.unknown { border-left-color: var(--muted); }
 .critical-head {
   display: flex;
   align-items: center;
@@ -320,6 +340,7 @@ textarea { resize: vertical; }
 .critical-saldo { font-size: 22px; font-weight: 700; }
 .critical-card.critical .critical-saldo { color: var(--red); }
 .critical-card.warn .critical-saldo { color: var(--yellow); }
+.critical-card.ok .critical-saldo { color: var(--green); }
 .critical-meta { font-size: 11.5px; color: var(--text); margin-top: 6px; }
 .critical-meta.muted { color: var(--muted); }
 .critical-card .btn-saldo { margin-top: 10px; width: 100%; }
@@ -336,15 +357,42 @@ textarea { resize: vertical; }
 .saldo-bar span { display: block; height: 100%; background: var(--accent); }
 .critical-card.warn .saldo-bar span { background: var(--yellow); }
 .critical-card.critical .saldo-bar span { background: var(--red); }
+.critical-card.ok .saldo-bar span { background: var(--green); }
 
 .saldo-badge {
   font-size: 10px;
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 20px;
+  background: var(--border);
+  color: var(--muted);
 }
 .saldo-badge.critical { background: rgba(248,81,73,0.18); color: var(--red); }
 .saldo-badge.warn { background: rgba(210,153,34,0.18); color: var(--yellow); }
+.saldo-badge.ok { background: rgba(63,185,80,0.18); color: var(--green); }
+
+/* Resumo no topo da aba de alertas de saldo */
+.saldo-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+.saldo-summary-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.saldo-summary-card.red { border-left-color: var(--red); }
+.saldo-summary-card.yellow { border-left-color: var(--yellow); }
+.saldo-summary-card.green { border-left-color: var(--green); }
+.saldo-summary-value { font-size: 28px; font-weight: 700; }
+.saldo-summary-card.red .saldo-summary-value { color: var(--red); }
+.saldo-summary-card.yellow .saldo-summary-value { color: var(--yellow); }
+.saldo-summary-card.green .saldo-summary-value { color: var(--green); }
+.saldo-summary-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
 .saldo-cell { min-width: 130px; }
 .saldo-value { font-weight: 700; }

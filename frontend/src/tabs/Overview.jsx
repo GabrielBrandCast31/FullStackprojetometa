@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import { money, num, pct, roasClass } from "../lib/format.js";
-import { computeSaldo } from "../lib/saldo.js";
+import { money, num, roasClass } from "../lib/format.js";
 import { renderMarkdown } from "../lib/markdown.js";
 import { fetchAuth } from "../lib/api.js";
 import { generateReport } from "../lib/report.js";
@@ -14,7 +13,7 @@ const SUGGESTIONS = [
 
 export default function Overview({
   clients, campaigns, manualSaldo, datePreset,
-  onEditSaldo, onOpenClient, aiEnabled, setStatus,
+  onOpenClient, aiEnabled, setStatus,
 }) {
   function exportPdf() {
     generateReport({
@@ -27,28 +26,35 @@ export default function Overview({
   const k = useMemo(() => {
     const spend = campaigns.reduce((s, c) => s + c.spend, 0);
     const revenue = campaigns.reduce((s, c) => s + c.revenue, 0);
-    const conversions = campaigns.reduce((s, c) => s + (c.results || 0), 0);
+    const results = campaigns.reduce((s, c) => s + (c.results || 0), 0);
+    const conversations = campaigns.reduce((s, c) => s + (c.conversations || 0), 0);
     const impressions = campaigns.reduce((s, c) => s + c.impressions, 0);
     const clicks = campaigns.reduce((s, c) => s + c.clicks, 0);
     return {
-      spend, revenue, conversions, impressions, clicks,
+      spend, revenue, results, conversations, impressions, clicks,
       roas: spend ? revenue / spend : 0,
       ctr: impressions ? (clicks / impressions) * 100 : 0,
-      cpa: conversions ? spend / conversions : 0,
+      cpa: results ? spend / results : 0,
+      cpc_conv: conversations ? spend / conversations : 0,
       activeClients: clients.filter((c) => c.account_status === 1).length,
       activeCampaigns: campaigns.filter((c) => c.status === "ACTIVE").length,
     };
   }, [clients, campaigns]);
 
-  const kpiCards = [
+  // Métricas principais (destaque) + secundárias.
+  const mainKpis = [
+    { label: "Resultados", value: num(k.results) },
+    { label: "Custo por Resultado", value: k.cpa ? money(k.cpa) : "—" },
+    { label: "Conversas Iniciadas", value: num(k.conversations) },
+    { label: "Custo por Conversa", value: k.cpc_conv ? money(k.cpc_conv) : "—" },
+  ];
+  const secondaryKpis = [
     { label: "Investido", value: money(k.spend) },
     { label: "Receita", value: money(k.revenue) },
     {
       label: "ROAS geral", value: k.roas.toFixed(2),
       cls: k.roas >= 2 ? "green" : k.roas >= 1 ? "yellow" : "red",
     },
-    { label: "Conversões", value: num(k.conversions) },
-    { label: "Custo por Conversão", value: k.cpa ? money(k.cpa) : "—" },
     { label: "Clientes ativos", value: `${k.activeClients}/${clients.length}` },
     { label: "Campanhas ativas", value: num(k.activeCampaigns) },
     { label: "CTR médio", value: k.ctr.toFixed(2) + "%" },
@@ -88,8 +94,17 @@ export default function Overview({
         </div>
       </section>
 
+      <section id="kpis-main" className="kpi-grid kpi-grid-main">
+        {mainKpis.map((c) => (
+          <div className="kpi kpi-highlight" key={c.label}>
+            <div className="label">{c.label}</div>
+            <div className={"value " + (c.cls || "")}>{c.value}</div>
+          </div>
+        ))}
+      </section>
+
       <section id="kpis" className="kpi-grid">
-        {kpiCards.map((c) => (
+        {secondaryKpis.map((c) => (
           <div className="kpi" key={c.label}>
             <div className="label">{c.label}</div>
             <div className={"value " + (c.cls || "")}>{c.value}</div>
@@ -194,76 +209,6 @@ function Insights({ campaigns }) {
   return lines.map((t, i) => (
     <li className="mini-item" key={i}><div className="mini-info">{t}</div></li>
   ));
-}
-
-function Critical({ clients, manualSaldo, datePreset, onEditSaldo, onOpenClient }) {
-  const rows = clients.map((cl) => ({ cl, saldo: computeSaldo(cl, manualSaldo, datePreset) }));
-  const criticos = rows
-    .filter((r) => r.saldo.known && (r.saldo.level === "critical" || r.saldo.level === "warn"))
-    .sort((a, b) => (a.saldo.daysLeft ?? 1e9) - (b.saldo.daysLeft ?? 1e9));
-  const semDado = rows.filter((r) => !r.saldo.known && r.saldo.spend > 0);
-
-  return (
-    <section className="panel critical-panel">
-      <h2>🚨 Clientes críticos — saldo acabando</h2>
-      <p className="panel-hint">
-        Saldo estimado por cliente. Avise antes de zerar: mande o boleto de recarga.
-      </p>
-      <div className="critical-list">
-        {!criticos.length && !semDado.length && (
-          <p className="mini-empty">Nenhum cliente em situação crítica de saldo. ✅</p>
-        )}
-
-        {criticos.map(({ cl, saldo }) => {
-          const dias = saldo.daysLeft == null ? "—"
-            : saldo.daysLeft < 1 ? "menos de 1 dia"
-            : `~${Math.floor(saldo.daysLeft)} dia(s)`;
-          return (
-            <div
-              key={cl.account_id}
-              className={"critical-card " + saldo.level}
-              onClick={(e) => {
-                // Botao "Cadastrar saldo" abre o modal; clique no card vai pra campanhas.
-                if (e.target.closest(".btn-saldo")) return;
-                onOpenClient(cl.name);
-              }}
-            >
-              <div className="critical-head">
-                <strong>{cl.name}</strong>
-                <span className={"saldo-badge " + saldo.level}>
-                  {saldo.level === "critical" ? "CRÍTICO" : "ATENÇÃO"}
-                </span>
-              </div>
-              <div className="critical-saldo">{money(saldo.remaining, cl.currency)}</div>
-              <div className="saldo-bar">
-                <span style={{ width: Math.min(saldo.consumedPct, 100) + "%" }} />
-              </div>
-              <div className="critical-meta">
-                {pct(saldo.consumedPct)} consumido · gasto ~{money(saldo.dailyRate, cl.currency)}/dia
-                · acaba em <strong>{dias}</strong>
-              </div>
-              <div className="critical-meta muted">Fonte: {saldo.source}</div>
-              <button className="btn-ghost btn-saldo" onClick={(e) => { e.stopPropagation(); onEditSaldo(cl.account_id); }}>
-                Cadastrar / ajustar saldo
-              </button>
-            </div>
-          );
-        })}
-
-        {semDado.length > 0 && (
-          <div className="critical-card unknown">
-            <div className="critical-head">
-              <strong>{semDado.length} cliente(s) sem dado de saldo</strong>
-            </div>
-            <div className="critical-meta">
-              Têm gasto no período mas nenhum saldo informado, limite de conta ou orçamento total.
-              Cadastre o saldo para acompanhar: {semDado.map((r) => r.cl.name).slice(0, 6).join(", ")}.
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
-  );
 }
 
 function AnalysisPanel({ campaigns, aiEnabled }) {
