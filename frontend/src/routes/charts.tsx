@@ -25,10 +25,24 @@ function ChartsPage() {
   const [period, setPeriod] = useState<Period>("last_30d");
   const d = useDashboard(period);
   const [metric, setMetric] = useState<"spend" | "revenue" | "results" | "roas" | "clicks">("spend");
+  const [clientFilter, setClientFilter] = useState<string>("ALL");
+
+  // Lista de clientes disponíveis no select.
+  const clientOptions = useMemo(
+    () => d.clients.map((c) => ({ id: c.account_id, name: c.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [d.clients],
+  );
+
+  // Clientes filtrados (1 só ou todos).
+  const scopedClients = useMemo(
+    () => clientFilter === "ALL" ? d.clients : d.clients.filter((c) => c.account_id === clientFilter),
+    [d.clients, clientFilter],
+  );
 
   const campaigns = useMemo(
-    () => d.clients.flatMap((c) => c.campaigns.map((cp) => ({ ...cp, currency: c.currency, _clientName: c.name }))),
-    [d.clients],
+    () => scopedClients.flatMap((c) => c.campaigns.map((cp) => ({ ...cp, currency: c.currency, _clientName: c.name }))),
+    [scopedClients],
   );
 
   // ===== Status Counters =====
@@ -48,16 +62,24 @@ function ChartsPage() {
   }, [campaigns]);
 
   // ===== Top clientes por investimento (donut + barras) =====
-  const byClient = useMemo(() => d.clients
-    .map((cl) => ({
-      name: cl.name,
-      spend: cl.summary.total_spend,
-      revenue: cl.summary.total_revenue,
-      roas: cl.summary.roas,
-    }))
-    .filter((c) => c.spend > 0)
-    .sort((a, b) => b.spend - a.spend),
-    [d.clients]);
+  // Quando 1 cliente filtrado: vira "campanhas desse cliente"; caso contrário, é por cliente.
+  const byClient = useMemo(() => {
+    if (clientFilter !== "ALL") {
+      return campaigns
+        .filter((c) => c.spend > 0)
+        .map((c) => ({ name: c.name, spend: c.spend, revenue: c.revenue, roas: c.roas }))
+        .sort((a, b) => b.spend - a.spend);
+    }
+    return scopedClients
+      .map((cl) => ({
+        name: cl.name,
+        spend: cl.summary.total_spend,
+        revenue: cl.summary.total_revenue,
+        roas: cl.summary.roas,
+      }))
+      .filter((c) => c.spend > 0)
+      .sort((a, b) => b.spend - a.spend);
+  }, [scopedClients, campaigns, clientFilter]);
 
   // Donut top 8 + "Outros"
   const donutData = useMemo(() => {
@@ -93,11 +115,18 @@ function ChartsPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Gráficos</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Visualizações dos dados carregados
+              {clientFilter === "ALL"
+                ? "Visão geral de todos os clientes"
+                : `Performance de ${clientOptions.find((o) => o.id === clientFilter)?.name || ""}`}
               {d.fromCache && <span className="ml-2 rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">cache 30min</span>}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}
+              className="min-w-[200px] rounded-md border border-border bg-card px-3 py-1.5 text-sm">
+              <option value="ALL">Todos os clientes</option>
+              {clientOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
               {PERIODS.map((p) => (
                 <button key={p.id} onClick={() => setPeriod(p.id)}
@@ -145,7 +174,8 @@ function ChartsPage() {
             </div>
           </Widget>
 
-          <Widget title="Participação no Investimento" hint={`${byClient.length} cliente(s) com gasto`}>
+          <Widget title={clientFilter === "ALL" ? "Participação no Investimento" : "Distribuição entre Campanhas"}
+            hint={clientFilter === "ALL" ? `${byClient.length} cliente(s) com gasto` : `${byClient.length} campanha(s) com gasto`}>
             <div className="relative h-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -168,7 +198,8 @@ function ChartsPage() {
         </div>
 
         {/* Linha 2: Performance por cliente (wide) */}
-        <Widget title="Performance por Cliente" hint="Investido + Receita (barras) e ROAS (linha)" className="mb-6">
+        <Widget title={clientFilter === "ALL" ? "Performance por Cliente" : "Performance por Campanha"}
+          hint="Investido + Receita (barras) e ROAS (linha)" className="mb-6">
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={byClient.slice(0, 10)} margin={{ top: 10, right: 16, left: 0, bottom: 30 }}>
@@ -235,8 +266,8 @@ function ChartsPage() {
           </div>
         </Widget>
 
-        {/* Linha 4: Tendência diária (reusa CostChart) */}
-        {d.clients.length > 0 && <CostChart clients={d.clients} period={period} />}
+        {/* Linha 4: Tendência diária (reusa CostChart) — só dos clientes em escopo */}
+        {scopedClients.length > 0 && <CostChart clients={scopedClients} period={period} />}
       </main>
     </div>
   );

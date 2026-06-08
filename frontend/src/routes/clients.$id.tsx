@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { CostChart } from "@/components/dashboard/CostChart";
 import { SaldoModal } from "@/components/dashboard/SaldoModal";
 import { ChevronLeft, DollarSign, MousePointerClick, TrendingUp, Wallet, Target, BarChart3, Eye, Users, MessageCircle, LogOut, RefreshCw, FileText, Trophy, Flame, Sparkles } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from "recharts";
 import { useDashboard, type Period } from "@/hooks/useDashboard";
 import { fmtMoney, fmtNum } from "@/lib/api/client";
 import { computeSaldo, accountStatusLabel, cpaClass, cpaMedian, roasClass } from "@/lib/saldo";
@@ -75,19 +75,59 @@ function ClientDetailPage() {
     return { value: `${v > 0 ? "+" : ""}${v.toFixed(1).replace(".", ",")}%`, positive: v > 0 };
   }
 
-  // Cliente não está no overview ainda (carregando) ou ID inválido
-  useEffect(() => {
-    if (!d.loading && d.clients.length && !client) {
-      // ID inválido — volta pra lista
-      nav({ to: "/clients" });
-    }
-  }, [client, d.loading, d.clients.length, nav]);
-
+  // Estados de loading/erro/missing — sem redirect automático (evita loop)
   if (!d.authChecked || d.tokenConfigured === null) {
+    return <FullScreen message="Verificando sessão..." />;
+  }
+  if (!d.tokenConfigured) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <p className="text-sm text-muted-foreground">Verificando sessão...</p>
-      </div>
+      <FullScreen>
+        <div className="rounded-2xl border border-border bg-card p-6 max-w-md text-center">
+          <h2 className="text-base font-semibold">Token do Meta não configurado</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Configure o token antes de ver detalhes de cliente.
+          </p>
+          <button onClick={() => nav({ to: "/" })}
+            className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+            Ir pra Visão Geral
+          </button>
+        </div>
+      </FullScreen>
+    );
+  }
+  if (d.loading && !d.clients.length) {
+    return <FullScreen message="Carregando dados do Meta..." />;
+  }
+  if (!d.loading && d.clients.length === 0) {
+    return (
+      <FullScreen>
+        <div className="rounded-2xl border border-border bg-card p-6 max-w-md text-center">
+          <h2 className="text-base font-semibold">Sem dados disponíveis</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {d.error || "Nenhum cliente carregado. Tente atualizar."}
+          </p>
+          <button onClick={d.refresh}
+            className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+            Atualizar dados
+          </button>
+        </div>
+      </FullScreen>
+    );
+  }
+  if (!client) {
+    return (
+      <FullScreen>
+        <div className="rounded-2xl border border-border bg-card p-6 max-w-md text-center">
+          <h2 className="text-base font-semibold">Cliente não encontrado</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            O cliente com ID <code className="font-mono text-foreground">{id}</code> não está na lista carregada.
+          </p>
+          <button onClick={() => nav({ to: "/clients" })}
+            className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+            Voltar pra lista
+          </button>
+        </div>
+      </FullScreen>
     );
   }
 
@@ -245,11 +285,34 @@ function ClientDetailPage() {
           </section>
         )}
 
-        {/* Gráficos: distribuição + funil lado a lado */}
+        {/* Status counters das campanhas do cliente */}
+        {client && client.campaigns.length > 0 && (
+          <section className="mb-6">
+            <CampaignStatusCounters client={client} />
+          </section>
+        )}
+
+        {/* Gráficos: distribuição de orçamento + funil lado a lado */}
         {client && client.campaigns.length > 0 && (
           <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
             <BudgetDistribution client={client} />
             <DeliveryFunnel client={client} />
+          </section>
+        )}
+
+        {/* Investido × Receita por campanha (top 8) + Distribuição de conversões */}
+        {client && client.campaigns.filter((c) => c.spend > 0).length > 0 && (
+          <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <SpendVsRevenueChart client={client} />
+            <ConversionsDistribution client={client} />
+          </section>
+        )}
+
+        {/* Matriz de Performance (ROAS × Investido) + Comparativo de Métricas */}
+        {client && client.campaigns.filter((c) => c.spend > 0).length > 0 && (
+          <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <PerformanceMatrix client={client} />
+            <MetricsComparison client={client} />
           </section>
         )}
 
@@ -329,6 +392,15 @@ function ClientDetailPage() {
             onRemove={() => { d.removeSaldo(client.account_id); setEditing(false); }} />
         )}
       </main>
+    </div>
+  );
+}
+
+// ============== Tela cheia (loading / mensagem) ==============
+function FullScreen({ message, children }: { message?: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      {message ? <p className="text-sm text-muted-foreground">{message}</p> : children}
     </div>
   );
 }
@@ -413,6 +485,223 @@ function BudgetDistribution({ client }: { client: NonNullable<ReturnType<typeof 
             </li>
           ))}
         </ul>
+      </div>
+    </section>
+  );
+}
+
+// ============== Status counters das campanhas do cliente ==============
+function CampaignStatusCounters({ client }: { client: NonNullable<ReturnType<typeof useDashboard>["clients"][number]> }) {
+  const ativas = client.campaigns.filter((c) => c.status === "ACTIVE").length;
+  const pausadas = client.campaigns.filter((c) => (c.status || "").includes("PAUSED")).length;
+  const semEntrega = client.campaigns.filter((c) => c.status === "ACTIVE" && c.impressions === 0).length;
+  const queimando = client.campaigns.filter((c) => c.status === "ACTIVE" && c.spend > 0 && c.roas < 1).length;
+
+  const items = [
+    { label: "ATIVAS", value: ativas, cls: "text-success bg-success/10" },
+    { label: "PAUSADAS", value: pausadas, cls: "text-yellow-400 bg-yellow-400/10" },
+    { label: "SEM ENTREGA", value: semEntrega, cls: "text-orange-400 bg-orange-400/10" },
+    { label: "EM RISCO (ROAS<1)", value: queimando, cls: "text-destructive bg-destructive/10" },
+    { label: "TOTAL", value: client.campaigns.length, cls: "text-primary bg-primary/10" },
+  ];
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border p-5">
+        <h3 className="font-semibold">Status das Campanhas</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">Distribuição rápida do que está rolando.</p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 p-5 md:grid-cols-5">
+        {items.map((it) => (
+          <div key={it.label} className="text-center">
+            <div className="font-mono text-3xl font-bold tabular-nums">{it.value}</div>
+            <div className={`mt-2 inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${it.cls}`}>
+              {it.label}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============== Bar chart: Investido × Receita por campanha (top 8) ==============
+function SpendVsRevenueChart({ client }: { client: NonNullable<ReturnType<typeof useDashboard>["clients"][number]> }) {
+  const data = [...client.campaigns]
+    .filter((c) => c.spend > 0)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, 8)
+    .map((c) => ({
+      name: c.name.length > 22 ? c.name.slice(0, 20) + "…" : c.name,
+      investido: c.spend,
+      receita: c.revenue,
+      roas: c.roas,
+    }));
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border p-5">
+        <h3 className="font-semibold">Investido × Receita</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">Top 8 campanhas — compare quem gerou retorno.</p>
+      </div>
+      <div className="p-5">
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 10, right: 16, left: 0, bottom: 60 }}>
+              <CartesianGrid stroke="oklch(0.27 0.01 285)" strokeDasharray="3 6" vertical={false} />
+              <XAxis dataKey="name" stroke="oklch(0.62 0.01 285)" fontSize={9} tickLine={false} axisLine={false}
+                angle={-30} textAnchor="end" height={70} interval={0} />
+              <YAxis stroke="oklch(0.62 0.01 285)" fontSize={10} tickLine={false} axisLine={false}
+                tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
+              <Tooltip contentStyle={tooltipStyle}
+                formatter={(v: number, name) => [fmtMoney(v, client.currency), name === "investido" ? "Investido" : "Receita"]} />
+              <Bar dataKey="investido" fill="#6C02ED" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="receita" fill="#4ade80" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ============== Donut: Distribuição das conversões por campanha ==============
+function ConversionsDistribution({ client }: { client: NonNullable<ReturnType<typeof useDashboard>["clients"][number]> }) {
+  const camps = [...client.campaigns]
+    .filter((c) => c.results > 0)
+    .sort((a, b) => b.results - a.results);
+  if (!camps.length) {
+    return (
+      <section className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="border-b border-border p-5">
+          <h3 className="font-semibold">Conversões por Campanha</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">Sem conversões registradas no período.</p>
+        </div>
+        <div className="flex h-72 items-center justify-center p-5 text-sm text-muted-foreground">
+          Nenhuma campanha gerou conversão.
+        </div>
+      </section>
+    );
+  }
+  const top = camps.slice(0, 7);
+  const restSum = camps.slice(7).reduce((s, c) => s + c.results, 0);
+  const data = top.map((c) => ({ name: c.name.length > 30 ? c.name.slice(0, 28) + "…" : c.name, value: c.results }));
+  if (restSum > 0) data.push({ name: "Outros", value: restSum });
+  const total = data.reduce((s, d) => s + d.value, 0);
+  const topPct = total ? (data[0].value / total) * 100 : 0;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border p-5">
+        <h3 className="font-semibold">Conversões por Campanha</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {camps.length} campanha(s) gerando conversões · top campanha: <strong className="text-foreground">{topPct.toFixed(1).replace(".", ",")}%</strong>
+        </p>
+      </div>
+      <div className="p-5">
+        <div className="relative h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={data} dataKey="value" innerRadius={62} outerRadius={100}
+                paddingAngle={2} strokeWidth={2} stroke="oklch(0.18 0.04 295)">
+                {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+              </Pie>
+              <Tooltip contentStyle={tooltipStyle}
+                formatter={(v: number) => [fmtNum(v), "Conversões"]} />
+            </PieChart>
+          </ResponsiveContainer>
+          {data[0] && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-6">
+              <div className="font-mono text-2xl font-bold tabular-nums">{fmtNum(total)}</div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">total</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ============== Scatter: Matriz de Performance (ROAS × Investido, tamanho = conversões) ==============
+function PerformanceMatrix({ client }: { client: NonNullable<ReturnType<typeof useDashboard>["clients"][number]> }) {
+  const camps = client.campaigns.filter((c) => c.spend > 0);
+  // Separa em "boas" (ROAS >= 1) e "ruins" (< 1) pra cor distinta.
+  const good = camps.filter((c) => c.roas >= 1).map((c) => ({
+    name: c.name, x: c.spend, y: c.roas, z: Math.max(c.results || 0, 1) * 30,
+  }));
+  const bad = camps.filter((c) => c.roas < 1).map((c) => ({
+    name: c.name, x: c.spend, y: c.roas, z: Math.max(c.results || 0, 1) * 30,
+  }));
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border p-5">
+        <h3 className="font-semibold">Matriz de Performance</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          ROAS por investimento · tamanho da bolha = conversões · linha = ROAS 1
+        </p>
+      </div>
+      <div className="p-5">
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <ScatterChart margin={{ top: 10, right: 16, left: 10, bottom: 30 }}>
+              <CartesianGrid stroke="oklch(0.27 0.01 285)" strokeDasharray="3 6" />
+              <XAxis type="number" dataKey="x" name="Investido"
+                stroke="oklch(0.62 0.01 285)" fontSize={10} tickLine={false} axisLine={false}
+                tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`}
+                label={{ value: "Investido", position: "bottom", offset: -5, fill: "#71717a", fontSize: 10 }} />
+              <YAxis type="number" dataKey="y" name="ROAS"
+                stroke="oklch(0.62 0.01 285)" fontSize={10} tickLine={false} axisLine={false}
+                tickFormatter={(v) => `${v.toFixed(1)}x`} />
+              <ZAxis type="number" dataKey="z" range={[40, 400]} />
+              <Tooltip contentStyle={tooltipStyle} cursor={{ strokeDasharray: "3 3" }}
+                formatter={(v: number, n) => n === "x" ? [fmtMoney(v, client.currency), "Investido"]
+                  : n === "y" ? [`${v.toFixed(2)}x`, "ROAS"]
+                  : [String(Math.round(v / 30)), "Conversões"]} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Scatter name="Boas (ROAS ≥ 1)" data={good} fill="#4ade80" fillOpacity={0.7} />
+              <Scatter name="Em risco (ROAS < 1)" data={bad} fill="#f87171" fillOpacity={0.7} />
+            </ScatterChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ============== Bar chart: Comparativo de CTR / CPC / Frequência por campanha (top 5) ==============
+function MetricsComparison({ client }: { client: NonNullable<ReturnType<typeof useDashboard>["clients"][number]> }) {
+  const data = [...client.campaigns]
+    .filter((c) => c.spend > 0)
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, 5)
+    .map((c) => ({
+      name: c.name.length > 18 ? c.name.slice(0, 16) + "…" : c.name,
+      ctr: Number(c.ctr.toFixed(2)),
+      cpc: Number((c.cpc || 0).toFixed(2)),
+      freq: Number((c.frequency || 0).toFixed(2)),
+    }));
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border p-5">
+        <h3 className="font-semibold">Comparativo de Engajamento</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">CTR (%), CPC (R$) e Frequência das top 5 campanhas.</p>
+      </div>
+      <div className="p-5">
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 10, right: 16, left: 0, bottom: 50 }}>
+              <CartesianGrid stroke="oklch(0.27 0.01 285)" strokeDasharray="3 6" vertical={false} />
+              <XAxis dataKey="name" stroke="oklch(0.62 0.01 285)" fontSize={9} tickLine={false} axisLine={false}
+                angle={-30} textAnchor="end" height={60} interval={0} />
+              <YAxis stroke="oklch(0.62 0.01 285)" fontSize={10} tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="ctr" name="CTR (%)" fill="#56d4dd" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="cpc" name="CPC (R$)" fill="#fb923c" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="freq" name="Frequência" fill="#a78bfa" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </section>
   );

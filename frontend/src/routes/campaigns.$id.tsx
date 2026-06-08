@@ -170,6 +170,7 @@ function CampaignDetailPage() {
             value={c.cost_per_conversation ? fmtMoney(c.cost_per_conversation, currency) : "—"} icon={MessageCircle} />
         </section>
 
+        <section className="mb-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground">Demais métricas</section>
         <section className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
           <KpiCard label="Investido" value={fmtMoney(c.spend, currency)} icon={DollarSign} />
           <KpiCard label="Receita" value={fmtMoney(c.revenue, currency)} icon={DollarSign} />
@@ -186,5 +187,78 @@ function CampaignDetailPage() {
         </section>
       </main>
     </div>
+  );
+}
+
+// ============== Badge de performance (great / ok / bad) ==============
+function PerfBadge({ icon: Icon, title, value, level, hint }: {
+  icon: typeof Target;
+  title: string;
+  value: string;
+  level: "great" | "ok" | "bad";
+  hint: string;
+}) {
+  const cls = level === "great"
+    ? "border-l-success bg-success/5"
+    : level === "ok"
+    ? "border-l-yellow-400 bg-yellow-400/5"
+    : "border-l-destructive bg-destructive/5";
+  const valueCls = level === "great" ? "text-success" : level === "ok" ? "text-yellow-400" : "text-destructive";
+  const labelCls = level === "great" ? "text-success" : level === "ok" ? "text-yellow-400" : "text-destructive";
+  return (
+    <div className={`overflow-hidden rounded-2xl border border-l-2 border-border bg-card p-5 ${cls}`}>
+      <div className={`flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest ${labelCls}`}>
+        <Icon className="size-4" />
+        {title}
+      </div>
+      <div className={`mt-2 font-mono text-3xl font-bold tabular-nums ${valueCls}`}>{value}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
+    </div>
+  );
+}
+
+// ============== Funil de entrega da campanha ==============
+function CampaignFunnel({ c }: { c: Campaign }) {
+  const data = [
+    { label: "Impressões", value: c.impressions || 0, color: "#6C02ED" },
+    { label: "Alcance", value: c.reach || 0, color: "#a78bfa" },
+    { label: "Cliques no link", value: c.link_clicks || 0, color: "#56d4dd" },
+    { label: "Conversões", value: c.results || 0, color: "#4ade80" },
+  ];
+  const base = c.impressions || 1;
+  return (
+    <>
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 10, right: 16, left: 0, bottom: 20 }}>
+            <CartesianGrid stroke="oklch(0.27 0.01 285)" strokeDasharray="3 6" vertical={false} />
+            <XAxis dataKey="label" stroke="oklch(0.62 0.01 285)" fontSize={11} tickLine={false} axisLine={false} />
+            <YAxis stroke="oklch(0.62 0.01 285)" fontSize={10} tickLine={false} axisLine={false}
+              tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+            <Tooltip contentStyle={tooltipStyle}
+              formatter={(v: number) => {
+                const pct = ((v / base) * 100).toFixed(1).replace(".", ",");
+                return [`${fmtNum(v)} · ${pct}% de impr.`, "Valor"];
+              }} />
+            <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+              {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+        {data.map((d, i) => (
+          <div key={i} className="rounded-md border border-border bg-background/50 p-2">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{d.label}</div>
+            <div className="font-mono text-sm font-semibold tabular-nums" style={{ color: d.color }}>{fmtNum(d.value)}</div>
+            {i > 0 && (
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                {((d.value / base) * 100).toFixed(1).replace(".", ",")}% das impr.
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }

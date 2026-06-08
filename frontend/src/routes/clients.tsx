@@ -209,7 +209,7 @@ function ClientsPage() {
                       return (
                         <tr key={c.account_id}
                             className="cursor-pointer transition-colors hover:bg-white/[0.02]"
-                            onClick={() => nav({ to: "/", search: { client: c.account_id } as never })}>
+                            onClick={() => nav({ to: "/clients/$id", params: { id: c.account_id } })}>
                           <td className="px-6 py-4">
                             <div className="font-medium">{c.name}</div>
                             <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">act_{c.account_id}</div>
