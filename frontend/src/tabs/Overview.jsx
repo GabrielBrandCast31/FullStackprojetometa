@@ -211,7 +211,12 @@ export default function Overview({
               <span className="kpi-cell-icon">{c.icon}</span>
             </div>
             <div className="kpi-cell-value">{c.value}</div>
-            {c.trend && <div className={"kpi-cell-trend " + c.trend.cls}>{c.trend.text}</div>}
+            {c.trend && (
+              <div className="kpi-trend-row">
+                <span className={"kpi-cell-trend " + c.trend.cls}>{c.trend.text}</span>
+                <span className="kpi-trend-vs">vs período anterior</span>
+              </div>
+            )}
           </div>
         ))}
       </section>

@@ -1,10 +1,12 @@
 :root {
-  /* ============ Paleta Sonic Flow (Brandcast) ============
-     Primary   #001A4D  navy escuro
-     Secondary #6C02ED  roxo Brandcast (acento principal)
-     Tertiary  #3D0DD0  roxo-azulado (hover/destaque)
-     Neutral   #222222  cinza-quase-preto (cards)
-     ====================================================== */
+  /* ============ Paleta engaging-dashboards (Brandcast) ============
+     Equivalentes hex aproximados das vars oklch do design original.
+     background  oklch(0.13 0.03 295)  ~  #16131e   (fundo)
+     sidebar     oklch(0.11 0.03 295)  ~  #13101c   (sidebar mais escura)
+     card        oklch(0.18 0.04 295)  ~  #1f1a2d   (cards)
+     primary     oklch(0.58 0.27 300)  ~  #6C02ED   (Brandcast violet)
+     border      oklch(0.28 0.05 295)  ~  #3a2f4a
+     ============================================================ */
   --primary: #001A4D;
   --accent: #6C02ED;
   --accent-2: #3D0DD0;
@@ -13,13 +15,14 @@
   --accent-soft: rgba(108, 2, 237, 0.16);
   --accent-glow: rgba(108, 2, 237, 0.35);
 
-  --bg: #0a0710;             /* fundo geral (slightly purple-tinted black) */
-  --bg-2: #0f0c18;
-  --panel: rgba(28, 24, 38, 0.6);    /* glass — semi-transparente */
-  --panel-solid: #16131e;            /* fallback sólido (sem alpha) */
-  --panel-2: rgba(40, 36, 56, 0.6);  /* hover/secondary glass */
-  --panel-2-solid: #221d30;
-  --border: rgba(255, 255, 255, 0.08);
+  --bg: #16131e;             /* background (engaging-dashboards) */
+  --bg-2: #1a1626;
+  --panel: #1f1a2d;          /* card (engaging-dashboards) */
+  --panel-solid: #1f1a2d;
+  --panel-2: #2a2440;        /* hover/secondary */
+  --panel-2-solid: #2a2440;
+  --sidebar-bg: #13101c;     /* sidebar (mais escura que o background) */
+  --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.14);
   --border-soft: rgba(255, 255, 255, 0.04);
 
@@ -82,8 +85,6 @@ body > * { position: relative; z-index: 1; }
 body {
   font-family: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
-  background-image:
-    linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
@@ -92,11 +93,14 @@ body {
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
 }
-/* Números com largura tabular onde aparecem KPIs/tabelas */
-.kpi-cell-value, .kpi-trend, .top-campaigns-table td,
-.detail-campaigns-table td, table td.num, table td.money {
+/* Números monoespaçados em KPIs/tabelas (engaging-dashboards usa IBM Plex Mono). */
+.kpi-cell-value, .top-campaigns-table td,
+.detail-campaigns-table td, table tbody td.num, table tbody td.money {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px;
 }
+.kpi-cell-trend { font-variant-numeric: tabular-nums; }
 
 .hidden { display: none !important; }
 .muted { color: var(--muted); }
@@ -113,18 +117,15 @@ small { color: var(--muted); font-size: 0.85em; }
   padding-bottom: 40px;
 }
 
-/* Sidebar (glass com gradient sutil) */
+/* Sidebar (engaging-dashboards: minimalista, bg mais escura que o body) */
 .sidebar {
-  width: 248px;
+  width: 256px;
   flex-shrink: 0;
-  background:
-    linear-gradient(180deg, rgba(20, 18, 30, 0.85) 0%, rgba(14, 11, 20, 0.9) 100%);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 22px 16px;
+  padding: 24px 16px;
   gap: 18px;
   position: sticky;
   top: 0;
@@ -169,27 +170,11 @@ small { color: var(--muted); font-size: 0.85em; }
   color: var(--text);
 }
 .sidebar-item.active {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
-  color: #ffffff;
+  background: var(--accent-soft);
+  color: var(--accent-light);
   font-weight: 600;
-  box-shadow:
-    0 1px 0 rgba(255,255,255,0.18) inset,
-    0 8px 24px -8px rgba(108, 2, 237, 0.55),
-    0 0 0 1px rgba(108, 2, 237, 0.3);
 }
-.sidebar-item.active::before {
-  content: "";
-  position: absolute;
-  left: -16px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 22px;
-  background: var(--accent-light);
-  border-radius: 0 4px 4px 0;
-  box-shadow: 0 0 12px var(--accent);
-}
-.sidebar-item.active .sidebar-icon { filter: brightness(1.4); }
+.sidebar-item.active .sidebar-icon { color: var(--accent-light); }
 .sidebar-item:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -574,23 +559,30 @@ textarea { resize: vertical; }
   .overview-kpis { grid-template-columns: repeat(2, 1fr); }
 }
 .kpi-cell {
+  position: relative;
+  overflow: hidden;
   background: var(--panel);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px 22px 18px;
-  box-shadow: var(--shadow-card);
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+  gap: 8px;
+  transition: border-color 0.25s;
+}
+.kpi-cell::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(108,2,237,0.5), transparent);
+  opacity: 0;
+  transition: opacity 0.25s;
 }
 .kpi-cell:hover {
-  border-color: rgba(108,2,237,0.45);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-card-hover);
+  border-color: rgba(108,2,237,0.40);
 }
+.kpi-cell:hover::before { opacity: 1; }
 .kpi-cell-head {
   display: flex;
   align-items: flex-start;
@@ -598,46 +590,51 @@ textarea { resize: vertical; }
   gap: 8px;
 }
 .kpi-cell-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   font-weight: 500;
   line-height: 1.3;
-  letter-spacing: 0.1px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
 }
 .kpi-cell-icon {
   font-size: 14px;
-  width: 32px; height: 32px;
+  color: var(--muted);
+  width: auto; height: auto;
+  background: none;
+  border: none;
+  padding: 0;
   display: inline-flex;
   align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.04);
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  transition: background 0.2s, transform 0.2s;
-}
-.kpi-cell:hover .kpi-cell-icon {
-  background: var(--accent-soft);
-  transform: scale(1.05);
 }
 .kpi-cell-value {
   font-size: 30px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
   line-height: 1.05;
-  letter-spacing: -0.5px;
+  letter-spacing: -1px;
+}
+.kpi-trend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
 }
 .kpi-cell-trend {
-  font-size: 12.5px;
+  font-size: 11px;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px 9px;
-  border-radius: 999px;
+  padding: 2px 7px;
+  border-radius: 5px;
   width: fit-content;
 }
 .kpi-cell-trend.good { color: var(--green); background: var(--green-soft); }
 .kpi-cell-trend.bad { color: var(--red); background: var(--red-soft); }
 .kpi-cell-trend.neutral { color: var(--muted); background: rgba(255,255,255,0.04); }
+.kpi-trend-vs { color: var(--muted); }
 
 /* Painel de Performance (timeseries) */
 .performance-panel { padding: 22px 26px; }
@@ -1210,22 +1207,20 @@ textarea { resize: vertical; }
 /* Tabelas */
 .filter-count { color: var(--muted); font-size: 12px; margin-left: auto; }
 .table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td {
   text-align: right;
-  padding: 13px 12px;
-  border-bottom: 1px solid var(--border-soft);
+  padding: 16px 14px;
+  border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 th {
   color: var(--muted);
-  font-weight: 600;
-  font-size: 10.5px;
+  font-weight: 500;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 1.2px;
   border-bottom: 1px solid var(--border);
-  padding-top: 14px;
-  padding-bottom: 14px;
 }
 th:first-child, td:first-child,
 th:nth-child(2), td:nth-child(2) { text-align: left; }
