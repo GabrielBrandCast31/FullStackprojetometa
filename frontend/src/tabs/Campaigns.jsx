@@ -12,16 +12,17 @@ function StatusTag({ status }) {
   return <span className="tag tag-other">{label}</span>;
 }
 
-export default function Campaigns({ campaigns, clients, prefilter, onPrefilterConsumed, datePreset, setStatus }) {
+export default function Campaigns({ campaigns, clients, prefilter, onPrefilterConsumed, datePreset, setStatus, onOpenCampaign }) {
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
   const [clientFilter, setClientFilter] = useState("ALL");
   const [search, setSearch] = useState("");
 
-  // Consome pre-filtro vindo da Visao Geral (cliente clicado).
+  // Consome pre-filtro vindo da Visao Geral (cliente clicado) ou da busca global da topbar.
   useEffect(() => {
     if (prefilter) {
       if (prefilter.client) setClientFilter(prefilter.client);
       if (prefilter.status) setStatusFilter(prefilter.status);
+      if (typeof prefilter.search === "string") setSearch(prefilter.search);
       onPrefilterConsumed?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +117,8 @@ export default function Campaigns({ campaigns, clients, prefilter, onPrefilterCo
                 </tr>
               )}
               {filtered.map((c) => (
-                <tr key={c.id}>
+                <tr key={c.id} className="clickable-row"
+                    onClick={() => onOpenCampaign && onOpenCampaign(c.id)}>
                   <td>{c.name}</td>
                   <td>{c.client}</td>
                   <td><StatusTag status={c.status} /></td>

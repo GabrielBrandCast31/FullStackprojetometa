@@ -5,6 +5,7 @@ O access token nunca e armazenado - ele chega por requisicao e e usado na hora.
 """
 
 import asyncio
+import json
 
 # pyrefly: ignore [missing-import]
 import httpx
@@ -127,11 +128,13 @@ async def fetch_campaigns(client, version, account_id, token) -> list[dict]:
     return await _paged(client, url, params)
 
 
-async def fetch_campaign_insights(client, version, account_id, token, date_preset) -> list[dict]:
+async def fetch_campaign_insights(
+    client, version, account_id, token, date_preset=None, time_range=None
+) -> list[dict]:
     """Metricas agregadas por campanha no periodo escolhido.
 
-    Uma unica chamada a nivel de conta com level=campaign traz os insights
-    de todas as campanhas que tiveram entrega no periodo.
+    Passe `date_preset` (ex.: 'last_30d') OU `time_range` (dict {since, until})
+    para periodo customizado — usado para calcular periodo anterior comparativo.
     """
     url = f"{GRAPH}/{version}/act_{account_id}/insights"
     params = {
@@ -141,10 +144,13 @@ async def fetch_campaign_insights(client, version, account_id, token, date_prese
             "actions,action_values,purchase_roas,cost_per_action_type,"
             "attribution_setting,inline_link_clicks"
         ),
-        "date_preset": date_preset,
         "limit": 200,
         "access_token": token,
     }
+    if time_range:
+        params["time_range"] = json.dumps(time_range)
+    else:
+        params["date_preset"] = date_preset or "last_30d"
     return await _paged(client, url, params)
 
 

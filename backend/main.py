@@ -59,6 +59,9 @@ class OverviewRequest(BaseModel):
     date_preset: str = "last_30d"
     # Opcional: limita a busca a estas contas. Vazio = todas as contas do token.
     account_ids: list[str] = []
+    # Quando true, faz chamada extra ao Meta com o periodo anterior equivalente
+    # para calcular % de tendencia nos KPIs (gasto, receita, conversoes, etc.).
+    include_previous: bool = False
 
 
 class AnalyzeRequest(BaseModel):
@@ -104,9 +107,14 @@ def _to_int(v) -> int:
 
 
 async def _load_client(
-    http: httpx.AsyncClient, acc: dict, token: str, date_preset: str, sem: asyncio.Semaphore
+    http: httpx.AsyncClient, acc: dict, token: str, date_preset: str,
+    sem: asyncio.Semaphore, previous_range: dict | None = None,
 ) -> dict:
     """Monta o objeto de um cliente (conta de anuncios) com campanhas e metricas.
+
+    Quando `previous_range` for fornecido, faz uma chamada extra ao Meta com o
+    periodo anterior equivalente e expoe `summary_previous` no retorno — usado
+    para calcular a tendencia (% delta) nos KPIs do frontend.
 
     Um erro em uma conta (permissao, etc.) nao derruba as demais: fica em "error".
     O semaforo limita quantas contas sao consultadas ao mesmo tempo.
@@ -114,15 +122,29 @@ async def _load_client(
     account_id = str(acc.get("account_id") or acc.get("id", "")).replace("act_", "")
     error = None
     campaigns: list[dict] = []
+    summary_previous = None
     try:
         async with sem:
-            raw_campaigns, raw_insights = await asyncio.gather(
+            # Em paralelo: lista de campanhas + insights atuais + (opcional) insights anteriores.
+            tasks = [
                 meta_client.fetch_campaigns(http, API_VERSION, account_id, token),
                 meta_client.fetch_campaign_insights(
-                    http, API_VERSION, account_id, token, date_preset
+                    http, API_VERSION, account_id, token, date_preset=date_preset
                 ),
-            )
+            ]
+            if previous_range:
+                tasks.append(meta_client.fetch_campaign_insights(
+                    http, API_VERSION, account_id, token, time_range=previous_range
+                ))
+            results = await asyncio.gather(*tasks)
+            raw_campaigns = results[0]
+            raw_insights = results[1]
+            raw_prev = results[2] if previous_range else None
+
         campaigns = analysis.build_campaigns(raw_campaigns, raw_insights)
+        if raw_prev is not None:
+            prev_campaigns = analysis.build_campaigns(raw_campaigns, raw_prev)
+            summary_previous = analysis.build_summary(prev_campaigns)
     except meta_client.MetaAPIError as e:
         error = str(e)
     except httpx.HTTPError:
@@ -138,6 +160,7 @@ async def _load_client(
         "balance": meta_client.cents(acc.get("balance")),
         "campaigns": campaigns,
         "summary": analysis.build_summary(campaigns),
+        "summary_previous": summary_previous,
         "error": error,
     }
 
@@ -248,8 +271,13 @@ async def get_overview(req: OverviewRequest, user: dict = Depends(require_auth))
                     accounts = await meta_client.fetch_ad_accounts(client, API_VERSION, token)
 
             sem = asyncio.Semaphore(8)
+            previous_range = (
+                analysis.previous_period_range(req.date_preset)
+                if req.include_previous else None
+            )
             clients = await asyncio.gather(
-                *[_load_client(client, acc, token, req.date_preset, sem) for acc in accounts]
+                *[_load_client(client, acc, token, req.date_preset, sem, previous_range)
+                  for acc in accounts]
             )
     except meta_client.MetaAPIError as e:
         raise HTTPException(status_code=400, detail=str(e))

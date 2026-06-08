@@ -91,7 +91,7 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
   const clientBarData = {
     labels: byClient.map((c) => c.name),
     datasets: [
-      { label: "Investido", data: byClient.map((c) => c.spend), backgroundColor: "#4c8dff", yAxisID: "y" },
+      { label: "Investido", data: byClient.map((c) => c.spend), backgroundColor: "#6C02ED", yAxisID: "y" },
       { label: "Receita",   data: byClient.map((c) => c.revenue), backgroundColor: "#3fb950", yAxisID: "y" },
       {
         label: "ROAS", data: byClient.map((c) => c.roas),
@@ -178,7 +178,7 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
           if (c.roas >= 1) return "#d29922";
           return "#f85149";
         }
-        return "#4c8dff";
+        return "#6C02ED";
       }),
     }],
   };
@@ -260,7 +260,7 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
     datasets: [{
       label: "Volume",
       data: [funnel.impressions, funnel.reach, funnel.link_clicks, funnel.results],
-      backgroundColor: ["#4c8dff", "#a371f7", "#56d4dd", "#3fb950"],
+      backgroundColor: ["#6C02ED", "#a371f7", "#56d4dd", "#3fb950"],
     }],
   };
   const funnelOpts = {
@@ -283,6 +283,32 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
            grid: { color: "#2a3242" }, beginAtZero: true },
     },
   };
+
+  // ---- Status Counters (ATIVAS / PAUSADAS / SEM ENTREGA / TOTAL)
+  const statusCounters = useMemo(() => {
+    const ativas = campaigns.filter((c) => c.status === "ACTIVE").length;
+    const pausadas = campaigns.filter((c) => (c.status || "").includes("PAUSED")).length;
+    const semEntrega = campaigns.filter((c) => c.status === "ACTIVE" && c.impressions === 0).length;
+    return { ativas, pausadas, semEntrega, total: campaigns.length };
+  }, [campaigns]);
+
+  // ---- Risco: % de campanhas ativas COM gasto e ROAS < 1 (queimando)
+  const risco = useMemo(() => {
+    const ativas = campaigns.filter((c) => c.status === "ACTIVE" && c.spend > 0);
+    if (!ativas.length) return { pct: 0, count: 0, total: 0 };
+    const queimando = ativas.filter((c) => c.roas < 1).length;
+    return { pct: (queimando / ativas.length) * 100, count: queimando, total: ativas.length };
+  }, [campaigns]);
+
+  // ---- Maior cliente: % do gasto total
+  const maiorCliente = useMemo(() => {
+    if (!byClient.length) return null;
+    const total = byClient.reduce((s, c) => s + c.spend, 0) +
+                  (clients.length > byClient.length ? 0 : 0);
+    if (!total) return null;
+    const top = byClient[0];
+    return { name: top.name, pct: (top.spend / total) * 100, spend: top.spend };
+  }, [byClient, clients.length]);
 
   // ---- Tendencia diaria (chamada explicita: 1 request extra ao Meta)
   async function loadTrend() {
@@ -341,7 +367,7 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
   const trendData = trend ? {
     labels: trend.labels,
     datasets: [
-      { label: "Investido", data: trend.spend, borderColor: "#4c8dff",
+      { label: "Investido", data: trend.spend, borderColor: "#6C02ED",
         backgroundColor: "rgba(76,141,255,0.15)", tension: 0.3, yAxisID: "y", fill: true },
       { label: "Receita", data: trend.revenue, borderColor: "#3fb950",
         backgroundColor: "rgba(63,185,80,0.10)", tension: 0.3, yAxisID: "y", fill: true },
@@ -413,53 +439,180 @@ export default function Charts({ clients, campaigns, datePreset, metaToken, setS
       </section>
 
       <div className="charts-grid">
-        <section className="panel chart-panel">
-          <h2>Por cliente — barras</h2>
-          <p className="panel-hint">Gasto, receita e ROAS de cada cliente.</p>
-          <div className="chart-wrap"><Bar data={clientBarData} options={clientBarOpts} /></div>
-        </section>
-
-        <section className="panel chart-panel">
-          <h2>Participação no investimento</h2>
-          <p className="panel-hint">Quanto cada cliente representa do gasto total.</p>
-          <div className="chart-wrap"><Doughnut data={shareData} options={shareOpts} /></div>
-        </section>
-
-        <section className="panel chart-panel wide">
-          <h2>Top campanhas</h2>
-          <p className="panel-hint">Maiores campanhas pela métrica selecionada acima.</p>
-          <div className="chart-wrap chart-wrap-tall">
-            <Bar data={campBarData} options={campBarOpts} />
+        {/* Widget 1: Status das Campanhas (4 contadores coloridos) */}
+        <section className="chart-panel">
+          <div className="widget-header"><h2>Status das Campanhas</h2></div>
+          <div className="widget-body">
+            <div className="status-counters">
+              <div className="status-counter">
+                <div className="status-counter-value green">{statusCounters.ativas}</div>
+                <span className="status-counter-label green">ATIVAS</span>
+              </div>
+              <div className="status-counter">
+                <div className="status-counter-value yellow">{statusCounters.pausadas}</div>
+                <span className="status-counter-label yellow">PAUSADAS</span>
+              </div>
+              <div className="status-counter">
+                <div className="status-counter-value orange">{statusCounters.semEntrega}</div>
+                <span className="status-counter-label orange">SEM ENTREGA</span>
+              </div>
+              <div className="status-counter">
+                <div className="status-counter-value accent">{statusCounters.total}</div>
+                <span className="status-counter-label accent">TOTAL</span>
+              </div>
+            </div>
+          </div>
+          <div className="widget-footer">
+            <span>{statusCounters.total} campanha(s) no período</span>
+            <span>Distribuição por status</span>
           </div>
         </section>
 
-        <section className="panel chart-panel">
-          <h2>Alcance × Frequência</h2>
-          <p className="panel-hint">
-            Pessoas únicas atingidas (barra) e média de vezes que cada pessoa viu o anúncio (linha).
-          </p>
-          <div className="chart-wrap"><Bar data={reachData} options={reachOpts} /></div>
+        {/* Widget 2: Gauge - Campanhas em Risco */}
+        <section className="chart-panel">
+          <div className="widget-header"><h2>Campanhas em Risco</h2></div>
+          <div className="widget-body gauge-widget">
+            <Gauge pct={risco.pct} color={risco.pct >= 30 ? "#f87171" : risco.pct >= 15 ? "#facc15" : "#4ade80"} />
+            <div className={"gauge-label " +
+              (risco.pct >= 30 ? "status-counter-label red"
+                : risco.pct >= 15 ? "status-counter-label yellow"
+                : "status-counter-label green")}>
+              {risco.count} EM RISCO
+            </div>
+          </div>
+          <div className="widget-footer">
+            <span>{risco.total} campanha(s) ativas com gasto</span>
+            <span>ROAS &lt; 1 = queimando</span>
+          </div>
         </section>
 
-        <section className="panel chart-panel">
-          <h2>Funil de eficiência</h2>
-          <p className="panel-hint">
-            Impressões → Alcance → Cliques no link → Resultados
-            {clientFilter !== "ALL" ? ` · cliente ${clientFilter}` : " · todos os clientes"}.
-          </p>
-          <div className="chart-wrap"><Bar data={funnelData} options={funnelOpts} /></div>
+        {/* Widget 3: Donut Participação no Investimento (com % central do maior) */}
+        <section className="chart-panel">
+          <div className="widget-header"><h2>Participação no Investimento</h2></div>
+          <div className="widget-body">
+            <div className="chart-wrap donut-with-center">
+              <Doughnut data={shareData} options={shareOpts} />
+              {maiorCliente && (
+                <div className="donut-center-text">
+                  <div className="donut-center-value">{maiorCliente.pct.toFixed(0)}%</div>
+                  <div className="donut-center-label">{maiorCliente.name}</div>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="widget-footer">
+            <span>{byClient.length} cliente(s) com gasto</span>
+            <span>Top cliente em destaque</span>
+          </div>
         </section>
 
-        <section className="panel chart-panel wide">
-          <h2>Tendência diária</h2>
-          <p className="panel-hint">{trendStatus}</p>
-          <div className="chart-wrap chart-wrap-tall">
-            {trendData
-              ? <Line data={trendData} options={trendOpts} />
-              : <div style={{ height: "100%" }} />}
+        {/* Widget 4: Por Cliente — barras */}
+        <section className="chart-panel wide">
+          <div className="widget-header"><h2>Performance por Cliente</h2></div>
+          <div className="widget-body">
+            <p className="panel-hint">Gasto, receita e ROAS de cada cliente.</p>
+            <div className="chart-wrap chart-wrap-tall"><Bar data={clientBarData} options={clientBarOpts} /></div>
+          </div>
+          <div className="widget-footer">
+            <span>{byClient.length} cliente(s)</span>
+            <span>Barras (R$) + linha (ROAS)</span>
+          </div>
+        </section>
+
+        {/* Widget 5: Top campanhas */}
+        <section className="chart-panel full">
+          <div className="widget-header">
+            <h2>Top Campanhas — {METRIC_LABELS[metric]}</h2>
+          </div>
+          <div className="widget-body">
+            <p className="panel-hint">Maiores campanhas pela métrica selecionada acima.</p>
+            <div className="chart-wrap chart-wrap-tall">
+              <Bar data={campBarData} options={campBarOpts} />
+            </div>
+          </div>
+          <div className="widget-footer">
+            <span>Top {topN} {clientFilter !== "ALL" ? `de ${clientFilter}` : "no geral"}</span>
+            <span>Métrica: {METRIC_LABELS[metric]}</span>
+          </div>
+        </section>
+
+        {/* Widget 6: Alcance × Frequência */}
+        <section className="chart-panel">
+          <div className="widget-header"><h2>Alcance × Frequência</h2></div>
+          <div className="widget-body">
+            <p className="panel-hint">Pessoas únicas (barra) + média de vezes que cada uma viu (linha).</p>
+            <div className="chart-wrap"><Bar data={reachData} options={reachOpts} /></div>
+          </div>
+          <div className="widget-footer">
+            <span>{byClient.length} cliente(s)</span>
+            <span>Pondera frequência por impressões</span>
+          </div>
+        </section>
+
+        {/* Widget 7: Funil de eficiência */}
+        <section className="chart-panel">
+          <div className="widget-header"><h2>Funil de Eficiência</h2></div>
+          <div className="widget-body">
+            <p className="panel-hint">
+              Impressões → Alcance → Cliques link → Resultados
+              {clientFilter !== "ALL" ? ` · ${clientFilter}` : ""}.
+            </p>
+            <div className="chart-wrap"><Bar data={funnelData} options={funnelOpts} /></div>
+          </div>
+          <div className="widget-footer">
+            <span>{clientFilter === "ALL" ? "Todos os clientes" : clientFilter}</span>
+            <span>% relativo às impressões</span>
+          </div>
+        </section>
+
+        {/* Widget 8: Tendência diária (largura tripla) */}
+        <section className="chart-panel full">
+          <div className="widget-header"><h2>Tendência Diária</h2></div>
+          <div className="widget-body">
+            <p className="panel-hint">{trendStatus}</p>
+            <div className="chart-wrap chart-wrap-tall">
+              {trendData
+                ? <Line data={trendData} options={trendOpts} />
+                : <div style={{ height: "100%" }} />}
+            </div>
+          </div>
+          <div className="widget-footer">
+            <span>Investido + Receita + ROAS dia a dia</span>
+            <span>Requer 1 chamada extra ao Meta</span>
           </div>
         </section>
       </div>
     </section>
+  );
+}
+
+// ============================================================
+// Gauge (semicírculo) — SVG inline. pct: 0..100, color: hex string
+// ============================================================
+function Gauge({ pct, color }) {
+  const clamped = Math.max(0, Math.min(100, pct || 0));
+  const radius = 80;
+  const cx = 100, cy = 100;
+  const arcLen = Math.PI * radius; // half circumference
+  const offset = arcLen - (arcLen * clamped / 100);
+  return (
+    <div className="gauge-wrap">
+      <svg viewBox="0 0 200 130">
+        <path
+          d={`M ${cx - radius} ${cy} A ${radius} ${radius} 0 0 1 ${cx + radius} ${cy}`}
+          fill="none" strokeWidth="18" className="gauge-track"
+        />
+        <path
+          d={`M ${cx - radius} ${cy} A ${radius} ${radius} 0 0 1 ${cx + radius} ${cy}`}
+          fill="none" strokeWidth="18"
+          stroke={color}
+          strokeLinecap="round"
+          strokeDasharray={arcLen}
+          strokeDashoffset={offset}
+          className="gauge-fill"
+        />
+      </svg>
+      <div className="gauge-value" style={{ color }}>{clamped.toFixed(0)}%</div>
+    </div>
   );
 }

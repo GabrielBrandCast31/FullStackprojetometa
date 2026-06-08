@@ -12,6 +12,8 @@ import Campaigns from "../tabs/Campaigns.jsx";
 import Charts from "../tabs/Charts.jsx";
 import NewCampaign from "../tabs/NewCampaign.jsx";
 import SaldoAlerts from "../tabs/SaldoAlerts.jsx";
+import ClientDetail from "../tabs/ClientDetail.jsx";
+import CampaignDetail from "../tabs/CampaignDetail.jsx";
 import BrandLogo from "../components/BrandLogo.jsx";
 
 const TABS = [
@@ -47,6 +49,12 @@ export default function Dashboard() {
 
   // Filtro pré-aplicado quando vem da aba Visão Geral (cliente clicado).
   const [campaignsPrefilter, setCampaignsPrefilter] = useState(null);
+
+  // Drill-down: cliente/campanha selecionados pras telas de detalhe.
+  const [selectedClientId, setSelectedClientId] = useState(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
+  // De onde o detalhe foi aberto (pra "voltar" pra origem certa).
+  const [detailFrom, setDetailFrom] = useState("clients");
 
   // ---- valida token JWT na montagem e mostra nome do usuario logado
   useEffect(() => {
@@ -107,7 +115,7 @@ export default function Dashboard() {
       const { resp, data } = await fetchAuth("/api/overview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access_token: t, date_preset: period }),
+        body: JSON.stringify({ access_token: t, date_preset: period, include_previous: true }),
       });
       if (!resp.ok) throw new Error(data.detail || "Erro ao carregar dados.");
 
@@ -138,10 +146,22 @@ export default function Dashboard() {
     loaded ? `${clients.length} cliente(s) · ${campaigns.length} campanha(s)` : ""
   ), [loaded, clients.length, campaigns.length]);
 
-  // Atalho da Visao Geral / Criticos -> aba Campanhas filtrada pelo cliente.
-  function openClientCampaigns(clientName) {
-    setCampaignsPrefilter({ client: clientName, status: "ALL" });
-    setView("campaigns");
+  // Abre o dashboard de detalhe de UM cliente (drill-down).
+  // Aceita nome OU account_id (várias telas chamam por nome).
+  function openClientDetail(nameOrId, fromView = view) {
+    const cl = clients.find((c) => c.name === nameOrId || c.account_id === nameOrId);
+    if (!cl) return;
+    setSelectedClientId(cl.account_id);
+    setDetailFrom(fromView);
+    setView("client-detail");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // Abre o dashboard de detalhe de UMA campanha (drill-down dentro do cliente).
+  function openCampaignDetail(campaignId) {
+    setDetailFrom(view); // guarda a view atual pra "voltar" certo
+    setSelectedCampaignId(campaignId);
+    setView("campaign-detail");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -151,9 +171,19 @@ export default function Dashboard() {
       const cl = clients.find((c) => c.account_id === id);
       setSaldoEditing(cl ? { accountId: id, name: cl.name } : null);
     },
-    onOpenClient: openClientCampaigns,
+    onOpenClient: openClientDetail,
+    onOpenCampaign: openCampaignDetail,
     setStatus,
   };
+
+  const selectedClient = useMemo(
+    () => clients.find((c) => c.account_id === selectedClientId) || null,
+    [clients, selectedClientId],
+  );
+  const selectedCampaign = useMemo(
+    () => campaigns.find((c) => c.id === selectedCampaignId) || null,
+    [campaigns, selectedCampaignId],
+  );
 
   return (
     <div className="app-shell">
@@ -178,6 +208,14 @@ export default function Dashboard() {
         </nav>
 
         <div className="sidebar-foot">
+          <button
+            className="btn-primary sidebar-reload"
+            onClick={loadOverview}
+            disabled={loading || !token.trim()}
+            title={!token.trim() ? "Cole o token primeiro" : "Recarregar dados do Meta"}
+          >
+            {loading ? "Atualizando..." : "↻  Atualizar dados"}
+          </button>
           {user && (
             <div className="sidebar-user">
               <span className="sidebar-user-name">{user.name || user.email || ""}</span>
@@ -192,6 +230,12 @@ export default function Dashboard() {
           accountName={accountCount}
           userName={user ? (user.name || user.email || "") : ""}
           onLogout={logout}
+          onSearch={(q) => {
+            if (!loaded) return;
+            setCampaignsPrefilter({ search: q, status: "ALL" });
+            setView("campaigns");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
         />
 
         <section className="panel connect-panel">
@@ -228,6 +272,26 @@ export default function Dashboard() {
                                           onPrefilterConsumed={() => setCampaignsPrefilter(null)} />}
             {view === "charts"       && <Charts {...sharedProps} metaToken={token} onLogout={logout} />}
             {view === "new-campaign" && <NewCampaign {...sharedProps} metaToken={token} onLogout={logout} />}
+            {view === "client-detail" && (
+              <ClientDetail
+                client={selectedClient}
+                manualSaldo={manualSaldo}
+                datePreset={datePreset}
+                onBack={() => setView(detailFrom || "clients")}
+                onOpenCampaign={openCampaignDetail}
+                onEditSaldo={sharedProps.onEditSaldo}
+                setStatus={setStatus}
+              />
+            )}
+            {view === "campaign-detail" && (
+              <CampaignDetail
+                campaign={selectedCampaign}
+                client={clients.find((c) => c.account_id === selectedCampaign?.account_id) ||
+                        clients.find((c) => c.name === selectedCampaign?.client) || null}
+                datePreset={datePreset}
+                onBack={() => setView(detailFrom || "campaigns")}
+              />
+            )}
           </main>
         )}
 

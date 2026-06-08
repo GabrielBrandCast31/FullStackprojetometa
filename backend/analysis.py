@@ -2,9 +2,12 @@
 
 - build_campaigns: cruza campanhas + insights e calcula metricas derivadas.
 - build_summary: KPIs agregados.
+- previous_period_range: calcula o periodo anterior equivalente (pra trend %).
 - auto_insights: insights automaticos por regras.
 - analyze_question: respostas a perguntas em texto livre (fallback sem IA).
 """
+
+from datetime import date, timedelta
 
 # Tipos de acao do Meta que representam compra (em ordem de preferencia).
 PURCHASE_TYPES = [
@@ -148,14 +151,43 @@ def build_campaigns(raw_campaigns: list[dict], raw_insights: list[dict]) -> list
     return result
 
 
+def previous_period_range(date_preset: str) -> dict | None:
+    """Calcula o `time_range` (since/until em ISO) do periodo anterior
+    equivalente ao `date_preset`, pra comparar e exibir % de tendencia.
+
+    Exemplos (hoje = D):
+      - last_7d  cobre  D-7..D-1   ->  previous: D-14..D-8
+      - last_30d cobre  D-30..D-1  ->  previous: D-60..D-31
+      - today    cobre  D          ->  previous: D-1 (ontem)
+
+    Periodos sem janela fixa (this_month, last_month, maximum) retornam None
+    e o trend nao eh calculado nesses casos.
+    """
+    today = date.today()
+    days_map = {
+        "today": 1, "yesterday": 1,
+        "last_7d": 7, "last_14d": 14,
+        "last_30d": 30, "last_90d": 90,
+    }
+    days = days_map.get(date_preset)
+    if not days:
+        return None
+    end = today - timedelta(days=days + 1)
+    start = end - timedelta(days=days - 1)
+    return {"since": start.isoformat(), "until": end.isoformat()}
+
+
 def build_summary(campaigns: list[dict]) -> dict:
     """KPIs agregados de um conjunto de campanhas."""
     active = [c for c in campaigns if c["status"] == "ACTIVE"]
     total_spend = sum(c["spend"] for c in campaigns)
     total_revenue = sum(c["revenue"] for c in campaigns)
     total_purchases = sum(c["purchases"] for c in campaigns)
+    total_results = sum(c.get("results", 0) for c in campaigns)
+    total_conversations = sum(c.get("conversations", 0) for c in campaigns)
     total_impressions = sum(c["impressions"] for c in campaigns)
     total_clicks = sum(c["clicks"] for c in campaigns)
+    total_link_clicks = sum(c.get("link_clicks", 0) for c in campaigns)
 
     return {
         "total_campaigns": len(campaigns),
@@ -163,11 +195,15 @@ def build_summary(campaigns: list[dict]) -> dict:
         "total_spend": round(total_spend, 2),
         "total_revenue": round(total_revenue, 2),
         "total_purchases": round(total_purchases, 2),
+        "total_results": round(total_results, 2),
+        "total_conversations": round(total_conversations, 2),
         "total_impressions": total_impressions,
         "total_clicks": total_clicks,
+        "total_link_clicks": total_link_clicks,
         "roas": round(total_revenue / total_spend, 2) if total_spend else 0.0,
         "avg_ctr": round(total_clicks / total_impressions * 100, 2) if total_impressions else 0.0,
-        "cpa": round(total_spend / total_purchases, 2) if total_purchases else 0.0,
+        "cpa": round(total_spend / total_results, 2) if total_results else 0.0,
+        "cost_per_conversation": round(total_spend / total_conversations, 2) if total_conversations else 0.0,
     }
 
 
