@@ -4,10 +4,19 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { KpiCard } from "@/components/dashboard/KpiCard";
 import { CostChart } from "@/components/dashboard/CostChart";
 import { SaldoModal } from "@/components/dashboard/SaldoModal";
-import { ChevronLeft, DollarSign, MousePointerClick, TrendingUp, Wallet, Target, BarChart3, Eye, Users, MessageCircle, LogOut, RefreshCw } from "lucide-react";
+import { ChevronLeft, DollarSign, MousePointerClick, TrendingUp, Wallet, Target, BarChart3, Eye, Users, MessageCircle, LogOut, RefreshCw, FileText, Trophy, Flame, Sparkles } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useDashboard, type Period } from "@/hooks/useDashboard";
 import { fmtMoney, fmtNum } from "@/lib/api/client";
 import { computeSaldo, accountStatusLabel, cpaClass, cpaMedian, roasClass } from "@/lib/saldo";
+// @ts-expect-error report.js — gerador PDF
+import { generateReport } from "@/lib/report.js";
+
+const PALETTE = ["#6C02ED", "#a78bfa", "#3D0DD0", "#4ade80", "#56d4dd", "#fb923c", "#facc15", "#f87171"];
+const tooltipStyle: React.CSSProperties = {
+  background: "oklch(0.185 0.005 285)", border: "1px solid oklch(0.27 0.01 285)",
+  borderRadius: 8, fontSize: 12, fontFamily: "IBM Plex Mono, monospace",
+};
 
 const PERIODS: { id: Period; label: string }[] = [
   { id: "last_7d", label: "7d" }, { id: "last_30d", label: "30d" }, { id: "last_90d", label: "90d" },
@@ -123,6 +132,15 @@ function ClientDetailPage() {
                   }`}>{p.label}</button>
               ))}
             </div>
+            {client && (
+              <button onClick={() => generateReport({
+                clients: [client], accountId: client.account_id, datePreset: period,
+                manualSaldo: d.manualSaldo, onError: () => {},
+              })} title="Relatório PDF deste cliente"
+                className="rounded-md border border-border bg-card p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground">
+                <FileText className="size-4" />
+              </button>
+            )}
             <button onClick={d.refresh} disabled={d.loading}
               className="rounded-md border border-border bg-card p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground disabled:opacity-50">
               <RefreshCw className={`size-4 ${d.loading ? "animate-spin" : ""}`} />
@@ -195,6 +213,44 @@ function ClientDetailPage() {
             <KpiCard label="Custo/Conversa" value={k.cpcv ? fmtMoney(k.cpcv, client.currency) : "—"} icon={MessageCircle}
               delta={delta(k.cpcv, prev?.cost_per_conversation)} />
           </div>
+        )}
+
+        {/* Destaques (top performers do cliente) */}
+        {client && client.campaigns.length > 0 && (
+          <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <HighlightCard
+              icon={Trophy} cls="border-l-success text-success bg-success/5"
+              title="Melhor ROAS"
+              campaign={[...client.campaigns].filter((c) => c.spend > 0)
+                .sort((a, b) => b.roas - a.roas)[0]}
+              valueFmt={(c) => `${c.roas.toFixed(2)}x`}
+              currency={client.currency}
+            />
+            <HighlightCard
+              icon={Sparkles} cls="border-l-primary text-primary bg-primary/5"
+              title="Menor Custo/Conversão"
+              campaign={[...client.campaigns].filter((c) => c.cost_per_result > 0)
+                .sort((a, b) => a.cost_per_result - b.cost_per_result)[0]}
+              valueFmt={(c) => fmtMoney(c.cost_per_result, client.currency)}
+              currency={client.currency}
+            />
+            <HighlightCard
+              icon={Flame} cls="border-l-orange-400 text-orange-400 bg-orange-400/5"
+              title="Mais Conversões"
+              campaign={[...client.campaigns].filter((c) => c.results > 0)
+                .sort((a, b) => b.results - a.results)[0]}
+              valueFmt={(c) => fmtNum(c.results) + " " + (c.results_label || "")}
+              currency={client.currency}
+            />
+          </section>
+        )}
+
+        {/* Gráficos: distribuição + funil lado a lado */}
+        {client && client.campaigns.length > 0 && (
+          <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <BudgetDistribution client={client} />
+            <DeliveryFunnel client={client} />
+          </section>
         )}
 
         {/* Timeseries do cliente */}
@@ -274,5 +330,156 @@ function ClientDetailPage() {
         )}
       </main>
     </div>
+  );
+}
+
+// ============== Cards de destaque (Top performers) ==============
+type Campaign = NonNullable<ReturnType<typeof useDashboard>["clients"][number]["campaigns"][number]>;
+
+function HighlightCard({ icon: Icon, cls, title, campaign, valueFmt }: {
+  icon: typeof Trophy;
+  cls: string;
+  title: string;
+  campaign?: Campaign;
+  valueFmt: (c: Campaign) => string;
+  currency: string;
+}) {
+  return (
+    <div className={`overflow-hidden rounded-2xl border border-l-2 border-border bg-card p-5 ${cls}`}>
+      <div className="flex items-center gap-2">
+        <Icon className="size-4" />
+        <span className="text-[10px] font-bold uppercase tracking-widest">{title}</span>
+      </div>
+      {campaign ? (
+        <>
+          <div className="mt-2 truncate text-sm font-medium text-foreground" title={campaign.name}>
+            {campaign.name}
+          </div>
+          <div className="mt-2 font-mono text-2xl font-bold tabular-nums">{valueFmt(campaign)}</div>
+        </>
+      ) : (
+        <div className="mt-3 text-sm text-muted-foreground">Sem dados no período.</div>
+      )}
+    </div>
+  );
+}
+
+// ============== Donut: Distribuição do orçamento entre campanhas ==============
+function BudgetDistribution({ client }: { client: NonNullable<ReturnType<typeof useDashboard>["clients"][number]> }) {
+  const camps = [...client.campaigns]
+    .filter((c) => c.spend > 0)
+    .sort((a, b) => b.spend - a.spend);
+  const top = camps.slice(0, 7);
+  const restSum = camps.slice(7).reduce((s, c) => s + c.spend, 0);
+  const data = top.map((c) => ({ name: c.name.length > 30 ? c.name.slice(0, 28) + "…" : c.name, value: c.spend }));
+  if (restSum > 0) data.push({ name: "Outros", value: restSum });
+  const total = data.reduce((s, d) => s + d.value, 0);
+  const topPct = data.length && total ? (data[0].value / total) * 100 : 0;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border p-5">
+        <h3 className="font-semibold">Distribuição do Orçamento</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {camps.length} campanha(s) com gasto · concentração no top: <strong className="text-foreground">{topPct.toFixed(1).replace(".", ",")}%</strong>
+        </p>
+      </div>
+      <div className="p-5">
+        <div className="relative h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={data} dataKey="value" innerRadius={62} outerRadius={100}
+                paddingAngle={2} strokeWidth={2} stroke="oklch(0.18 0.04 295)">
+                {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
+              </Pie>
+              <Tooltip contentStyle={tooltipStyle}
+                formatter={(v: number) => [fmtMoney(v, client.currency), "Investido"]} />
+            </PieChart>
+          </ResponsiveContainer>
+          {data[0] && (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pb-6">
+              <div className="font-mono text-2xl font-bold tabular-nums">{topPct.toFixed(0)}%</div>
+              <div className="max-w-[140px] truncate px-2 text-[10px] uppercase tracking-wider text-muted-foreground">{data[0].name}</div>
+            </div>
+          )}
+        </div>
+        {/* Legenda compacta */}
+        <ul className="mt-4 space-y-1.5 text-xs">
+          {data.slice(0, 6).map((d, i) => (
+            <li key={d.name} className="flex items-center gap-2">
+              <span className="size-2.5 rounded-sm" style={{ background: PALETTE[i % PALETTE.length] }} />
+              <span className="flex-1 truncate text-muted-foreground">{d.name}</span>
+              <span className="font-mono tabular-nums">{fmtMoney(d.value, client.currency)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+// ============== Bar chart: Funil Impressões / Alcance / Cliques / Conversões ==============
+function DeliveryFunnel({ client }: { client: NonNullable<ReturnType<typeof useDashboard>["clients"][number]> }) {
+  const totals = client.campaigns.reduce(
+    (acc, c) => ({
+      impressions: acc.impressions + (c.impressions || 0),
+      reach: acc.reach + (c.reach || 0),
+      link_clicks: acc.link_clicks + (c.link_clicks || 0),
+      results: acc.results + (c.results || 0),
+    }),
+    { impressions: 0, reach: 0, link_clicks: 0, results: 0 },
+  );
+  const data = [
+    { label: "Impressões", value: totals.impressions, color: "#6C02ED" },
+    { label: "Alcance", value: totals.reach, color: "#a78bfa" },
+    { label: "Cliques no link", value: totals.link_clicks, color: "#56d4dd" },
+    { label: "Conversões", value: totals.results, color: "#4ade80" },
+  ];
+  const base = totals.impressions || 1;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border bg-card">
+      <div className="border-b border-border p-5">
+        <h3 className="font-semibold">Impressões × Alcance × Conversões</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Funil de entrega: cada etapa relativa ao total de impressões.
+        </p>
+      </div>
+      <div className="p-5">
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 10, right: 16, left: 0, bottom: 20 }}>
+              <CartesianGrid stroke="oklch(0.27 0.01 285)" strokeDasharray="3 6" vertical={false} />
+              <XAxis dataKey="label" stroke="oklch(0.62 0.01 285)" fontSize={11} tickLine={false} axisLine={false} />
+              <YAxis stroke="oklch(0.62 0.01 285)" fontSize={10} tickLine={false} axisLine={false}
+                tickFormatter={(v) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+              <Tooltip contentStyle={tooltipStyle}
+                formatter={(v: number) => {
+                  const pct = ((v / base) * 100).toFixed(1).replace(".", ",");
+                  return [`${fmtNum(v)} · ${pct}% de impressões`, "Valor"];
+                }} />
+              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+          {data.map((d, i) => (
+            <div key={i} className="rounded-md border border-border bg-background/50 p-2">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{d.label}</div>
+              <div className="font-mono text-sm font-semibold tabular-nums" style={{ color: d.color }}>
+                {fmtNum(d.value)}
+              </div>
+              {i > 0 && (
+                <div className="mt-0.5 text-[10px] text-muted-foreground">
+                  {((d.value / base) * 100).toFixed(1).replace(".", ",")}% das impr.
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }

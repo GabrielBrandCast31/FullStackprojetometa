@@ -1,10 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
-import { Search, RefreshCw, LogOut, AlertCircle } from "lucide-react";
+import { Search, RefreshCw, LogOut, AlertCircle, FileText } from "lucide-react";
 import { useDashboard, type Period } from "@/hooks/useDashboard";
 import { fmtMoney, fmtNum } from "@/lib/api/client";
 import { cpaClass, cpaMedian, roasClass } from "@/lib/saldo";
+// @ts-expect-error report.js — gerador PDF de campanhas filtradas
+import { generateCampaignsReport } from "@/lib/report.js";
 
 const PERIODS: { id: Period; label: string }[] = [
   { id: "last_7d", label: "7 dias" },
@@ -112,6 +114,16 @@ function CampaignsPage() {
                 </button>
               ))}
             </div>
+            {filtered.length > 0 && (
+              <button onClick={() => generateCampaignsReport({
+                campaigns: filtered, clients: d.clients, datePreset: period,
+                filters: { statusFilter, clientFilter, search },
+                onError: () => {},
+              })} title="PDF das campanhas filtradas"
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
+                <FileText className="size-4" /> PDF
+              </button>
+            )}
             <button onClick={d.refresh} disabled={d.loading}
               className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground disabled:opacity-50">
               <RefreshCw className={`size-4 ${d.loading ? "animate-spin" : ""}`} /> Atualizar

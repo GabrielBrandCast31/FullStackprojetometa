@@ -5,12 +5,15 @@ import { KpiCard } from "@/components/dashboard/KpiCard";
 import { CostChart } from "@/components/dashboard/CostChart";
 import { ChannelsChart } from "@/components/dashboard/ChannelsChart";
 import { CampaignTable } from "@/components/dashboard/CampaignTable";
-import { DollarSign, MousePointerClick, TrendingUp, Wallet, Target, BarChart3, LogOut, RefreshCw } from "lucide-react";
+import { DollarSign, MousePointerClick, TrendingUp, Wallet, Target, BarChart3, LogOut, RefreshCw, FileText } from "lucide-react";
 import {
   authMe, getAuthToken, clearAuthToken,
   getMetaTokenStatus, saveMetaToken, fetchOverview, fmtMoney, fmtNum,
   type Client,
 } from "@/lib/api/client";
+import { getManualSaldo } from "@/lib/api/client";
+// @ts-expect-error report.js — gerador de relatorio PDF Brandcast
+import { generateReport } from "@/lib/report.js";
 
 const PERIODS = [
   { id: "last_7d", label: "7 dias" },
@@ -167,6 +170,15 @@ function Index() {
                 </button>
               ))}
             </div>
+            {tokenConfigured && clients.length > 0 && (
+              <button onClick={() => generateReport({
+                clients, accountId: null, datePreset: period, manualSaldo: getManualSaldo(),
+                onError: (msg: string) => setError(msg),
+              })}
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:bg-white/5 hover:text-foreground">
+                <FileText className="size-4" /> PDF
+              </button>
+            )}
             {tokenConfigured && (
               <button onClick={() => loadData(true)} disabled={loading} title="Ignorar cache e buscar no Meta"
                 className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground disabled:opacity-50">

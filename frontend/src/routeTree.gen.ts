@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ClientsRouteImport } from './routes/clients'
+import { Route as ChartsRouteImport } from './routes/charts'
 import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as IndexRouteImport } from './routes/index'
@@ -31,6 +32,11 @@ const LoginRoute = LoginRouteImport.update({
 const ClientsRoute = ClientsRouteImport.update({
   id: '/clients',
   path: '/clients',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChartsRoute = ChartsRouteImport.update({
+  id: '/charts',
+  path: '/charts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CampaignsRoute = CampaignsRouteImport.update({
@@ -63,6 +69,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/alerts': typeof AlertsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
+  '/charts': typeof ChartsRoute
   '/clients': typeof ClientsRouteWithChildren
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
@@ -73,6 +80,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/alerts': typeof AlertsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
+  '/charts': typeof ChartsRoute
   '/clients': typeof ClientsRouteWithChildren
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
@@ -84,6 +92,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/alerts': typeof AlertsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
+  '/charts': typeof ChartsRoute
   '/clients': typeof ClientsRouteWithChildren
   '/login': typeof LoginRoute
   '/register': typeof RegisterRoute
@@ -96,6 +105,7 @@ export interface FileRouteTypes {
     | '/'
     | '/alerts'
     | '/campaigns'
+    | '/charts'
     | '/clients'
     | '/login'
     | '/register'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/alerts'
     | '/campaigns'
+    | '/charts'
     | '/clients'
     | '/login'
     | '/register'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/'
     | '/alerts'
     | '/campaigns'
+    | '/charts'
     | '/clients'
     | '/login'
     | '/register'
@@ -127,6 +139,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AlertsRoute: typeof AlertsRoute
   CampaignsRoute: typeof CampaignsRouteWithChildren
+  ChartsRoute: typeof ChartsRoute
   ClientsRoute: typeof ClientsRouteWithChildren
   LoginRoute: typeof LoginRoute
   RegisterRoute: typeof RegisterRoute
@@ -153,6 +166,13 @@ declare module '@tanstack/react-router' {
       path: '/clients'
       fullPath: '/clients'
       preLoaderRoute: typeof ClientsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/charts': {
+      id: '/charts'
+      path: '/charts'
+      fullPath: '/charts'
+      preLoaderRoute: typeof ChartsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/campaigns': {
@@ -220,6 +240,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AlertsRoute: AlertsRoute,
   CampaignsRoute: CampaignsRouteWithChildren,
+  ChartsRoute: ChartsRoute,
   ClientsRoute: ClientsRouteWithChildren,
   LoginRoute: LoginRoute,
   RegisterRoute: RegisterRoute,

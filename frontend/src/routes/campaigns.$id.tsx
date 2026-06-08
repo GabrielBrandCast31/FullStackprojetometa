@@ -2,9 +2,17 @@ import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { KpiCard } from "@/components/dashboard/KpiCard";
-import { ChevronLeft, DollarSign, MousePointerClick, TrendingUp, Wallet, Target, BarChart3, Eye, Users, MessageCircle, ShoppingCart, Repeat, Link as LinkIcon, LogOut } from "lucide-react";
+import { ChevronLeft, DollarSign, MousePointerClick, TrendingUp, Wallet, Target, BarChart3, Eye, Users, MessageCircle, ShoppingCart, Repeat, Link as LinkIcon, LogOut, FileText, Award } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useDashboard } from "@/hooks/useDashboard";
 import { fmtMoney, fmtNum, type Campaign, type Client } from "@/lib/api/client";
+// @ts-expect-error report.js gerador PDF
+import { generateCampaignsReport } from "@/lib/report.js";
+
+const tooltipStyle: React.CSSProperties = {
+  background: "oklch(0.185 0.005 285)", border: "1px solid oklch(0.27 0.01 285)",
+  borderRadius: 8, fontSize: 12, fontFamily: "IBM Plex Mono, monospace",
+};
 
 export const Route = createFileRoute("/campaigns/$id")({
   head: () => ({ meta: [{ title: "Campanha — Brandcast" }] }),
@@ -85,6 +93,14 @@ function CampaignDetailPage() {
               {c.objective && <span>{c.objective}</span>}
             </div>
           </div>
+          <button onClick={() => generateCampaignsReport({
+            campaigns: [c], clients: [client], datePreset: "last_30d",
+            filters: { statusFilter: "ALL", clientFilter: client.name, search: "" },
+            onError: () => {},
+          })} title="PDF desta campanha"
+            className="rounded-md border border-border bg-card p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground">
+            <FileText className="size-4" />
+          </button>
           <button onClick={d.logout} title="Sair"
             className="rounded-md border border-border bg-card p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground">
             <LogOut className="size-4" />
@@ -103,6 +119,44 @@ function CampaignDetailPage() {
                 <div className="mt-1 text-sm font-medium">{v}</div>
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* Destaques de performance da campanha */}
+        <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <PerfBadge
+            icon={Award}
+            title="ROAS"
+            value={`${(c.roas || 0).toFixed(2)}x`}
+            level={c.roas >= 2 ? "great" : c.roas >= 1 ? "ok" : "bad"}
+            hint={c.roas >= 2 ? "Excelente — escale" : c.roas >= 1 ? "Retorno positivo" : "Investimento queimando"}
+          />
+          <PerfBadge
+            icon={Target}
+            title="Conversões"
+            value={fmtNum(c.results)}
+            level={c.results >= 50 ? "great" : c.results >= 5 ? "ok" : "bad"}
+            hint={c.results > 0 ? `${c.results_label || "objetivo"}` : "Sem conversões"}
+          />
+          <PerfBadge
+            icon={BarChart3}
+            title="CTR"
+            value={`${(c.ctr || 0).toFixed(2).replace(".", ",")}%`}
+            level={c.ctr >= 1.5 ? "great" : c.ctr >= 0.8 ? "ok" : "bad"}
+            hint={c.ctr >= 1.5 ? "Engajamento alto" : c.ctr >= 0.8 ? "Engajamento OK" : "Engajamento baixo"}
+          />
+        </section>
+
+        {/* Funil: Impressões × Alcance × Cliques × Conversões */}
+        <section className="mb-6 overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="border-b border-border p-5">
+            <h3 className="font-semibold">Impressões × Alcance × Conversões</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Funil de entrega da campanha · cada etapa em % das impressões.
+            </p>
+          </div>
+          <div className="p-5">
+            <CampaignFunnel c={c} />
           </div>
         </section>
 

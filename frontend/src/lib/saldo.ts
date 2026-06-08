@@ -104,13 +104,24 @@ export function cpaMedian(items: { cost_per_result?: number }[], key: "cost_per_
   return vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
 }
 
-// Quanto menor (e > 0), mais forte o destaque visual.
+// Quanto menor (e > 0), mais forte o destaque visual. Retorna classes Tailwind pra UI.
 export function cpaClass(cpa: number, refMedian: number): string {
   if (!cpa || cpa <= 0 || !refMedian) return "";
   const ratio = cpa / refMedian;
   if (ratio <= 0.40) return "text-success font-bold";
   if (ratio <= 0.65) return "text-success";
   if (ratio <= 0.95) return "text-success/80";
+  return "";
+}
+
+// Label semantico ("cpa-elite", "cpa-best", "cpa-good", "") — usado pelo
+// gerador de PDF que tem seu proprio CSS interno.
+export function cpaLabel(cpa: number, refMedian: number): string {
+  if (!cpa || cpa <= 0 || !refMedian) return "";
+  const ratio = cpa / refMedian;
+  if (ratio <= 0.40) return "cpa-elite";
+  if (ratio <= 0.65) return "cpa-best";
+  if (ratio <= 0.95) return "cpa-good";
   return "";
 }
 
