@@ -1,29 +1,28 @@
-# Build multi-stage:
-#   1) Node — instala deps e roda `vite build`, produzindo /app/dist.
-#   2) nginx — copia o dist e serve, fazendo proxy de /api -> backend:8000.
+# TanStack Start em Node runtime (preset nitro: node-server).
+# Stage 1 builda o app; Stage 2 roda `node .output/server/index.mjs`.
 
 # ---------- Stage 1: build ----------
 FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Camada de deps (cacheia ate package.json mudar).
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm install --legacy-peer-deps --no-audit --no-fund
 
-# Codigo + build.
 COPY . .
 RUN npm run build
 
-# ---------- Stage 2: serve ----------
-FROM nginx:1.27-alpine
+# ---------- Stage 2: runtime ----------
+FROM node:20-alpine AS runtime
 
-# Config customizada: SPA fallback + reverse proxy /api -> backend
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
-# Apenas os artefatos buildados — sem node_modules, sem fonte.
-COPY --from=build /app/dist /usr/share/nginx/html
+# Copia só o output gerado pelo Nitro (server + public assets + manifest).
+COPY --from=build /app/.output ./.output
 
+ENV NODE_ENV=production
+ENV PORT=80
 EXPOSE 80
 
-# nginx ja roda em foreground por padrao na imagem oficial.
+# srvx (server runtime do Nitro/h3) le HOST e PORT automaticamente.
+CMD ["node", ".output/server/index.mjs"]

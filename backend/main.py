@@ -26,6 +26,7 @@ from pydantic import BaseModel
 import ai_analysis
 import analysis
 import auth
+import cache
 import meta_client
 
 load_dotenv()
@@ -55,13 +56,21 @@ class DashboardRequest(BaseModel):
 
 
 class OverviewRequest(BaseModel):
-    access_token: str
+    # access_token agora vem do backend (auth.get_meta_token). Mantem opcional
+    # por compat (front antigo); se passado, sobrescreve o armazenado.
+    access_token: str = ""
     date_preset: str = "last_30d"
     # Opcional: limita a busca a estas contas. Vazio = todas as contas do token.
     account_ids: list[str] = []
     # Quando true, faz chamada extra ao Meta com o periodo anterior equivalente
     # para calcular % de tendencia nos KPIs (gasto, receita, conversoes, etc.).
     include_previous: bool = False
+    # Pula o cache e busca direto na Marketing API (botao "Atualizar agora").
+    force_refresh: bool = False
+
+
+class MetaTokenRequest(BaseModel):
+    access_token: str
 
 
 class AnalyzeRequest(BaseModel):
@@ -236,12 +245,28 @@ async def get_dashboard(req: DashboardRequest, user: dict = Depends(require_auth
 async def get_overview(req: OverviewRequest, user: dict = Depends(require_auth)):
     """Busca todas as contas (clientes) do token e devolve campanhas + metricas.
 
-    Cada conta de anuncios e tratada como um cliente. Quando account_ids vem
-    vazio, lista todas as contas que o token consegue acessar.
+    O `access_token` do Meta agora vem do backend (vinculado ao usuario logado).
+    A resposta eh cacheada por 30 minutos por (user_id, date_preset, include_previous)
+    pra reduzir chamadas a Marketing API.
     """
-    token = req.access_token.strip()
+    user_id = user.get("sub") or ""
+    # Token pode vir no body (compat) ou do storage; storage tem prioridade nula.
+    token = (req.access_token or "").strip() or auth.get_meta_token(user_id)
     if not token:
-        raise HTTPException(status_code=400, detail="Informe o access token.")
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum access token do Meta cadastrado. Configure em /api/meta/token.",
+        )
+
+    # Cache lookup — chave inclui tudo que muda o resultado.
+    cache_key = (
+        f"overview:{user_id}:{req.date_preset}:{int(req.include_previous)}:"
+        f"{','.join(sorted(req.account_ids))}"
+    )
+    if not req.force_refresh:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return {**cached, "from_cache": True}
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -290,26 +315,40 @@ async def get_overview(req: OverviewRequest, user: dict = Depends(require_auth))
             detail="Nenhuma conta de anúncios encontrada para este token.",
         )
 
-    return {"date_preset": req.date_preset, "clients": list(clients)}
+    result = {"date_preset": req.date_preset, "clients": list(clients)}
+    cache.set(cache_key, result)
+    return {**result, "from_cache": False}
 
 
 class TimeseriesRequest(BaseModel):
-    access_token: str
+    access_token: str = ""  # opcional — usa o armazenado por padrao
     account_ids: list[str]
     date_preset: str = "last_30d"
+    force_refresh: bool = False
 
 
 @app.post("/api/timeseries")
-async def get_timeseries(req: TimeseriesRequest, _: dict = Depends(require_auth)):
+async def get_timeseries(req: TimeseriesRequest, user: dict = Depends(require_auth)):
     """Serie diaria agregada das contas pedidas. Usada pelo grafico de tendencia.
 
-    Faz uma chamada por conta (time_increment=1) e devolve os pontos brutos.
-    O frontend faz a soma por dia para o grafico de linha.
+    Token vem do backend (armazenado por usuario). Resposta cacheada 30 min.
     """
-    token = req.access_token.strip()
+    user_id = user.get("sub") or ""
+    token = (req.access_token or "").strip() or auth.get_meta_token(user_id)
     ids = [a.strip().replace("act_", "") for a in req.account_ids if a.strip()]
-    if not token or not ids:
-        raise HTTPException(status_code=400, detail="Token e contas sao obrigatorios.")
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum access token do Meta cadastrado. Configure em /api/meta/token.",
+        )
+    if not ids:
+        raise HTTPException(status_code=400, detail="Informe ao menos uma conta.")
+
+    cache_key = f"timeseries:{user_id}:{req.date_preset}:{','.join(sorted(ids))}"
+    if not req.force_refresh:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return {**cached, "from_cache": True}
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -329,7 +368,51 @@ async def get_timeseries(req: TimeseriesRequest, _: dict = Depends(require_auth)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="Falha de conexao com o Meta.")
 
-    return {"date_preset": req.date_preset, "accounts": results}
+    result = {"date_preset": req.date_preset, "accounts": results}
+    cache.set(cache_key, result)
+    return {**result, "from_cache": False}
+
+
+# ============================================================
+# Endpoints do Meta token armazenado no backend (vinculado ao usuario logado).
+# ============================================================
+@app.get("/api/meta/token")
+async def meta_token_status(user: dict = Depends(require_auth)):
+    """Diz se ha um token cadastrado pra esse usuario, sem revelar o valor."""
+    token = auth.get_meta_token(user.get("sub") or "")
+    return {"configured": bool(token), "preview": (token[:10] + "..." if token else "")}
+
+
+@app.post("/api/meta/token")
+async def meta_token_save(req: MetaTokenRequest, user: dict = Depends(require_auth)):
+    """Salva ou substitui o access token do Meta do usuario logado.
+
+    Invalida o cache desse usuario (overview + timeseries) imediatamente.
+    """
+    token = (req.access_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token vazio.")
+    user_id = user.get("sub") or ""
+    auth.set_meta_token(user_id, token)
+    cache.invalidate(f"overview:{user_id}:")
+    cache.invalidate(f"timeseries:{user_id}:")
+    return {"ok": True, "preview": token[:10] + "..."}
+
+
+@app.delete("/api/meta/token")
+async def meta_token_delete(user: dict = Depends(require_auth)):
+    """Apaga o token armazenado e o cache associado."""
+    user_id = user.get("sub") or ""
+    auth.set_meta_token(user_id, "")
+    cache.invalidate(f"overview:{user_id}:")
+    cache.invalidate(f"timeseries:{user_id}:")
+    return {"ok": True}
+
+
+@app.get("/api/cache/stats")
+async def cache_stats_endpoint(_: dict = Depends(require_auth)):
+    """Snapshot do cache em memoria (debug)."""
+    return cache.stats()
 
 
 class PagesRequest(BaseModel):

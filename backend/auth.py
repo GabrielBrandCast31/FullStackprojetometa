@@ -66,16 +66,35 @@ def init_db() -> None:
                     name          TEXT NOT NULL,
                     email         TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
+                    meta_token    TEXT,
                     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
+            # Migracao idempotente para instancias antigas que ja tinham a tabela
+            # sem a coluna meta_token.
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS meta_token TEXT")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS users_email_lower_idx ON users (lower(email))"
             )
     except psycopg.OperationalError:
         # Banco indisponivel no boot — toleramos: o erro vai aparecer no /login.
         pass
+
+
+def get_meta_token(user_id: int | str) -> str:
+    """Devolve o access token do Meta armazenado pra esse usuario, ou ""."""
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT meta_token FROM users WHERE id = %s", (int(user_id),))
+        row = cur.fetchone()
+    return (row[0] if row and row[0] else "") or ""
+
+
+def set_meta_token(user_id: int | str, token: str) -> None:
+    """Salva (ou substitui) o access token do Meta pra esse usuario."""
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute("UPDATE users SET meta_token = %s WHERE id = %s",
+                    (token or None, int(user_id)))
 
 
 def _hash_password(password: str) -> str:
