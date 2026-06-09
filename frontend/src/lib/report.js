@@ -1,545 +1,550 @@
 import { fmtMoney as money, fmtNum as num } from "./api/client";
-import { PERIOD_LABELS } from "./saldo";
 import brandcastLogoUrl from "../assets/brandcastlogo.png";
 
 // ============================================================================
-// Gerador de relatórios PDF — modelo Brandcast (tema claro).
-// Estrutura: cabeçalho com logo → resumo executivo → KPIs → tabelas →
-// comparativo → recomendações → rodapé. Abre HTML em nova aba pra imprimir/PDF.
+// Gerador de relatórios PDF — estilo "Relatório Semanal de Mídia Paga".
+// Layout multi-seção com gráficos (Chart.js via CDN), faixa de cabeçalho/rodapé
+// em todas as páginas impressas, e marca Agência Brandcast (logo + roxo).
 // ============================================================================
 
-function pct(v) { return ((v || 0).toFixed(1) + "%").replace(".", ","); }
 function esc(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function fmtPeriodoExtenso(datePreset) {
-  // Constrói "DD de mês de AAAA a DD de mês de AAAA (N dias)" a partir do preset.
   const days = { last_7d: 7, last_14d: 14, last_30d: 30, last_90d: 90 }[datePreset] || 30;
-  const meses = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
-    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const meses = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
   const fim = new Date(); fim.setDate(fim.getDate() - 1);
   const ini = new Date(fim); ini.setDate(ini.getDate() - (days - 1));
-  const f = (d) => `${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}`;
-  return `${f(ini)} a ${f(fim)} (${days} dias)`;
+  const f = (d) => `${String(d.getDate()).padStart(2, "0")} de ${meses[d.getMonth()]}`;
+  return `${f(ini)} a ${f(fim)} de ${fim.getFullYear()}`;
 }
 
-// --- Logo: PNG → dataURI base64 (canvas), cacheado. Necessário pq o relatório
-// abre em janela blob: onde URL relativa não resolve. ---
-let _logoDataUriCache = null;
-async function getBrandLogoDataUri() {
-  if (_logoDataUriCache) return _logoDataUriCache;
+// Logo PNG → dataURI (canvas), cacheado. Necessário pq o relatório abre em blob:.
+let _logoCache = null;
+async function getLogo() {
+  if (_logoCache) return _logoCache;
   try {
-    _logoDataUriCache = await new Promise((resolve, reject) => {
+    _logoCache = await new Promise((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.onload = () => {
-        const targetH = 200;
-        const scale = Math.min(1, targetH / img.naturalHeight);
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(img.naturalWidth * scale);
-        canvas.height = Math.round(img.naturalHeight * scale);
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        try { resolve(canvas.toDataURL("image/png")); } catch (e) { reject(e); }
+        const h = 120, scale = Math.min(1, h / img.naturalHeight);
+        const c = document.createElement("canvas");
+        c.width = Math.round(img.naturalWidth * scale);
+        c.height = Math.round(img.naturalHeight * scale);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        try { resolve(c.toDataURL("image/png")); } catch (e) { reject(e); }
       };
-      img.onerror = (e) => reject(e || new Error("img load failed"));
+      img.onerror = reject;
       img.src = brandcastLogoUrl;
     });
-  } catch {
-    _logoDataUriCache = brandcastLogoUrl;
-  }
-  return _logoDataUriCache;
+  } catch { _logoCache = brandcastLogoUrl; }
+  return _logoCache;
 }
 
-// ============================================================================
-// CSS do template (tema claro Brandcast)
-// ============================================================================
-const REPORT_CSS = `
-  :root {
-    --roxo: #6C02ED;
-    --roxo-escuro: #4a0a8f;
-    --roxo-claro: #f3ecfe;
-    --verde: #15803d;
-    --verde-bg: #dcfce7;
-    --texto: #1f2937;
-    --muted: #6b7280;
-    --borda: #e5e7eb;
-    --zebra: #faf8ff;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body {
-    background: #fff; color: var(--texto);
-    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 13px; line-height: 1.55;
-    -webkit-print-color-adjust: exact; print-color-adjust: exact;
-  }
-  .page { max-width: 820px; margin: 0 auto; padding: 40px 48px 60px; }
-
-  /* Cabeçalho */
-  .rpt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
-    border-bottom: 3px solid var(--roxo); padding-bottom: 18px; margin-bottom: 28px; }
-  .rpt-head-logo { height: 46px; width: auto; }
-  .rpt-kicker { font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
-    text-transform: uppercase; color: var(--muted); }
-  .rpt-title { font-size: 32px; font-weight: 800; color: var(--roxo); line-height: 1.1; margin: 2px 0 4px; }
-  .rpt-sub { font-size: 13px; color: var(--muted); }
-
-  /* Seções */
-  h2.sec { font-size: 18px; font-weight: 700; color: var(--roxo); margin: 28px 0 10px; }
-  h3.sub { font-size: 14px; font-weight: 700; color: var(--roxo-escuro); margin: 16px 0 4px; }
-  p { margin-bottom: 10px; }
-  .muted-note { font-size: 11.5px; color: var(--muted); font-style: italic; margin-top: 8px; }
-
-  /* Grid de KPIs */
-  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--borda);
-    border-radius: 8px; overflow: hidden; margin: 6px 0 4px; }
-  .kpi { padding: 14px 12px; text-align: center; border-right: 1px solid var(--borda);
-    border-bottom: 1px solid var(--borda); }
-  .kpi:nth-child(4n) { border-right: none; }
-  .kpi:nth-last-child(-n+4) { border-bottom: none; }
-  .kpi-label { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--muted); }
-  .kpi-value { font-size: 18px; font-weight: 800; color: var(--roxo); margin-top: 4px; }
-
-  /* Tabelas */
-  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
-  thead th { background: var(--roxo); color: #fff; font-weight: 700; text-align: left;
-    padding: 9px 10px; font-size: 11px; }
-  thead th.num { text-align: right; }
-  tbody td { padding: 9px 10px; border-bottom: 1px solid var(--borda); }
-  tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tbody tr:nth-child(even) { background: var(--zebra); }
-  tbody tr.total td { font-weight: 800; background: #f3f4f6; border-top: 2px solid var(--roxo); }
-  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 3px;
-    vertical-align: middle; }
-  .dot.roxo { background: var(--roxo); }
-  .dot.roxo2 { background: #a78bfa; }
-  .green { color: var(--verde); font-weight: 800; }
-  .green-cell { background: var(--verde-bg) !important; color: var(--verde); font-weight: 800; }
-
-  /* Comparativo (métrica × colunas) */
-  .cmp th:first-child { width: 38%; }
-  .cmp td:first-child, .cmp th:first-child { text-align: left; }
-  .cmp td:not(:first-child), .cmp th:not(:first-child) { text-align: center; }
-
-  /* Bullets */
-  ul.recs { margin: 6px 0 10px 4px; }
-  ul.recs li { margin: 0 0 8px 16px; padding-left: 4px; }
-
-  /* Rodapé */
-  .rpt-foot { margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--borda);
-    text-align: center; font-size: 11px; color: var(--muted); }
-  .rpt-foot .gen { font-style: italic; margin-bottom: 4px; }
-
-  .actions { position: fixed; top: 16px; right: 16px; }
-  .actions button { background: var(--roxo); color: #fff; border: none; border-radius: 8px;
-    padding: 10px 18px; font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(108,2,237,.3); }
-  @media print { .actions { display: none; } .page { padding: 0; } @page { margin: 16mm; size: A4; } }
-`;
-
-// Shell comum: cabeçalho com logo + corpo + rodapé.
-function shell({ logoUri, kicker, title, sub, body, footName }) {
-  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8" />
-<title>${esc(title)} — Relatório Brandcast</title><style>${REPORT_CSS}</style></head>
-<body>
-  <div class="actions"><button onclick="window.print()">Imprimir / Salvar PDF</button></div>
-  <div class="page">
-    <header class="rpt-head">
-      <div>
-        <div class="rpt-kicker">${esc(kicker)}</div>
-        <div class="rpt-title">${esc(title)}</div>
-        <div class="rpt-sub">${esc(sub)}</div>
-      </div>
-      ${logoUri ? `<img class="rpt-head-logo" src="${logoUri}" alt="Agência Brandcast" />` : ""}
-    </header>
-    ${body}
-    <footer class="rpt-foot">
-      <div class="gen">Relatório gerado pela Agência Brandcast a partir dos dados do Gerenciador de Anúncios da Meta.</div>
-      <div>${esc(footName)}</div>
-    </footer>
-  </div>
-</body></html>`;
+// Detecta etapa do funil pelo prefixo do nome (TOPO / MEIO / FUNDO).
+function funilStage(name) {
+  const n = (name || "").toUpperCase();
+  if (n.startsWith("TOPO") || n.includes("TOPO")) return "Topo";
+  if (n.startsWith("MEIO") || n.includes("MEIO")) return "Meio";
+  if (n.startsWith("FUNDO") || n.includes("FUNDO")) return "Fundo";
+  return "Outros";
 }
-
-function openReport(html, onError) {
-  const w = window.open("", "_blank");
-  if (!w) { if (onError) onError("Permita pop-ups deste site para gerar o relatório."); return; }
-  w.document.open(); w.document.write(html); w.document.close();
-}
-
-function kpi(label, value) {
-  return `<div class="kpi"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${value}</div></div>`;
+// Agrupa por prefixo (1ª palavra) pra detectar "séries" (ex.: APAGÃO 1..5).
+function serieKey(name) {
+  const m = (name || "").trim().match(/^([A-Za-zÀ-ÿ]+)/);
+  return m ? m[1].toUpperCase() : "";
 }
 
 function statusLabel(s) {
   if (s === "ACTIVE") return "Ativo";
-  if ((s || "").includes("PAUSED")) return "Pausado";
+  if ((s || "").includes("PAUSED")) return "Inativo";
   if (!s || s === "—" || s === "UNKNOWN") return "Inativo";
-  return "Não veiculando";
+  return "Inativo";
 }
+const isActive = (s) => s === "ACTIVE";
 
 // ============================================================================
-// 1) RELATÓRIO DE CAMPANHA — modelo principal (conjuntos de anúncios)
-//    Chamado do modal de breakdown, recebe os adsets/ads já carregados.
+// Gerador principal. rows = lista de conjuntos OU campanhas, com a forma:
+//   { name, status, spend, impressions, reach, cpm, frequency, clicks,
+//     results, cost_per_result, results_label }
 // ============================================================================
-export async function generateCampaignReport({ campaign, adsets = [], ads = [], datePreset, currency = "BRL", onError }) {
+async function generateWeekly({ title, level, rows, datePreset, currency, onError }) {
   try {
-    const logoUri = await getBrandLogoDataUri();
-    const periodo = fmtPeriodoExtenso(datePreset);
+    const logo = await getLogo();
     const cur = currency || "BRL";
+    const periodo = fmtPeriodoExtenso(datePreset);
+    const unidade = level === "conjunto" ? "conjuntos de anúncios" : "campanhas";
 
-    // Totais a partir dos conjuntos.
-    const tInvest = adsets.reduce((s, a) => s + (a.spend || 0), 0);
-    const tImpr = adsets.reduce((s, a) => s + (a.impressions || 0), 0);
-    const tReach = adsets.reduce((s, a) => s + (a.reach || 0), 0);
-    const tConv = adsets.reduce((s, a) => s + (a.results || 0), 0);
-    const comResultado = adsets.filter((a) => a.results > 0);
-    const comGasto = adsets.filter((a) => a.spend > 0);
-    const cpr = tConv ? tInvest / tConv : 0;
-    const cpm = tImpr ? (tInvest / tImpr) * 1000 : 0;
-    const freq = tReach ? tImpr / tReach : 0;
-    const resultLabel = (comResultado[0]?.results_label) || "Conversas";
+    // ---- Totais ----
+    const tSpend = rows.reduce((s, r) => s + (r.spend || 0), 0);
+    const tImpr = rows.reduce((s, r) => s + (r.impressions || 0), 0);
+    const tReach = rows.reduce((s, r) => s + (r.reach || 0), 0);
+    const tRes = rows.reduce((s, r) => s + (r.results || 0), 0);
+    const ativos = rows.filter((r) => isActive(r.status));
+    const spendAtivos = ativos.reduce((s, r) => s + (r.spend || 0), 0);
+    const cpmMedio = tImpr ? (tSpend / tImpr) * 1000 : 0;
+    const freqMedia = tReach ? tImpr / tReach : 0;
+    const comResultado = rows.filter((r) => r.results > 0);
+    const resLabel = comResultado[0]?.results_label || "Resultados";
 
-    // Melhor e pior conjunto (por custo por resultado, entre os com resultado).
+    // CPM por linha (recalcula se ausente).
+    const withCpm = rows.map((r) => ({
+      ...r, _cpm: r.cpm || (r.impressions ? (r.spend / r.impressions) * 1000 : 0),
+    }));
+
+    // Funil (por prefixo de nome).
+    const funil = { Topo: 0, Meio: 0, Fundo: 0, Outros: 0 };
+    rows.forEach((r) => { funil[funilStage(r.name)] += r.spend || 0; });
+    const temFunil = (funil.Topo + funil.Meio + funil.Fundo) > 0;
+
+    // Série dominante (grupo com mais membros e ≥3).
+    const grupos = {};
+    rows.forEach((r) => { const k = serieKey(r.name); if (k) (grupos[k] ||= []).push(r); });
+    const serieNome = Object.keys(grupos).sort((a, b) => grupos[b].length - grupos[a].length)[0];
+    const serie = serieNome && grupos[serieNome].length >= 3 ? grupos[serieNome] : null;
+
+    // Melhor / pior por custo por resultado.
     const rank = [...comResultado].sort((a, b) => a.cost_per_result - b.cost_per_result);
-    const melhor = rank[0];
-    const pior = rank.length > 1 ? rank[rank.length - 1] : null;
-    const economiaPct = (melhor && pior && pior.cost_per_result)
-      ? Math.round((1 - melhor.cost_per_result / pior.cost_per_result) * 100) : 0;
+    const melhor = rank[0], pior = rank.length > 1 ? rank[rank.length - 1] : null;
 
-    // ---- Resumo executivo (texto heurístico) ----
-    const resumo = [];
-    resumo.push(
-      `A campanha <strong>${esc(campaign.name)}</strong> foi veiculada no período de ${periodo}, ` +
-      `com ${adsets.length} conjunto(s) de anúncios configurado(s). ` +
-      `${comGasto.length} conjunto(s) registraram gasto e ${comResultado.length} efetivamente gerou(geraram) ` +
-      `resultados (${resultLabel.toLowerCase()}).`
-    );
-    resumo.push(
-      `No total, foram investidos <strong>${money(tInvest, cur)}</strong>, gerando ${num(tImpr)} impressões ` +
-      `e alcançando ${num(tReach)} pessoas únicas. A campanha originou <strong>${num(tConv)} ${resultLabel.toLowerCase()}</strong>.`
-    );
-    if (melhor) {
-      resumo.push(
-        `O custo médio por resultado foi de <strong>${money(cpr, cur)}</strong>. ` +
-        `O destaque positivo é o <strong>${esc(melhor.name)}</strong>, que entregou o menor custo por resultado ` +
-        `da campanha (${money(melhor.cost_per_result, cur)})` +
-        (pior && economiaPct > 0 ? `, ${economiaPct}% mais barato que o ${esc(pior.name)}.` : ".")
-      );
-    }
+    // ---- Dados pros gráficos (JSON serializado) ----
+    const sortBySpend = [...withCpm].sort((a, b) => b.spend - a.spend);
+    const chartData = JSON.stringify({
+      cur,
+      invest: {
+        labels: sortBySpend.map((r) => r.name),
+        values: sortBySpend.map((r) => +(r.spend || 0).toFixed(2)),
+        active: sortBySpend.map((r) => isActive(r.status)),
+      },
+      funil: temFunil ? {
+        labels: ["Topo", "Meio", "Fundo"].filter((k) => funil[k] > 0),
+        values: ["Topo", "Meio", "Fundo"].filter((k) => funil[k] > 0).map((k) => +funil[k].toFixed(2)),
+      } : null,
+      ativos: { ativo: +spendAtivos.toFixed(2), inativo: +(tSpend - spendAtivos).toFixed(2), n: ativos.length, total: rows.length },
+      imprReach: {
+        labels: sortBySpend.map((r) => r.name),
+        impr: sortBySpend.map((r) => r.impressions || 0),
+        reach: sortBySpend.map((r) => r.reach || 0),
+      },
+      cpm: (() => {
+        const s = [...withCpm].filter((r) => r._cpm > 0).sort((a, b) => a._cpm - b._cpm);
+        return { labels: s.map((r) => r.name), values: s.map((r) => +r._cpm.toFixed(2)), media: +cpmMedio.toFixed(2) };
+      })(),
+      resultados: comResultado.length ? {
+        labels: comResultado.map((r) => r.name),
+        res: comResultado.map((r) => r.results),
+        cpr: comResultado.map((r) => +(r.cost_per_result || 0).toFixed(2)),
+      } : null,
+      serie: serie ? {
+        nome: serieNome,
+        labels: serie.map((r) => r.name),
+        spend: serie.map((r) => +(r.spend || 0).toFixed(2)),
+        impr: serie.map((r) => r.impressions || 0),
+        res: serie.map((r) => r.results || 0),
+      } : null,
+      scatter: withCpm.filter((r) => r.reach > 0).map((r) => ({
+        name: r.name,
+        x: +(r.spend && r.reach ? (r.spend / r.reach) * 1000 : 0).toFixed(2), // custo por mil alcançadas
+        y: +(r.frequency || (r.reach ? r.impressions / r.reach : 0)).toFixed(2),
+        r: Math.max(4, Math.sqrt(r.spend || 1) * 1.6),
+        active: isActive(r.status),
+      })),
+    });
 
-    // ---- KPIs ----
-    const kpisHtml = `<div class="kpis">
-      ${kpi("Valor Investido", money(tInvest, cur))}
-      ${kpi("Impressões", num(tImpr))}
-      ${kpi("Alcance", num(tReach))}
-      ${kpi("Frequência", freq.toFixed(2).replace(".", ","))}
-      ${kpi(resultLabel, num(tConv))}
-      ${kpi("Custo por Resultado", melhor ? money(cpr, cur) : "—")}
-      ${kpi("CPM", money(cpm, cur))}
-      ${kpi("Conjuntos Ativos", num(adsets.filter((a) => a.status === "ACTIVE").length))}
-    </div>`;
+    // ---- Tabela de performance ----
+    const linhas = sortBySpend.map((r) => {
+      const best = melhor && r.name === melhor.name && r.cost_per_result > 0;
+      return `<tr>
+        <td class="left">${esc(r.name)}</td>
+        <td class="${isActive(r.status) ? "st-ativo" : "st-inativo"}">${statusLabel(r.status)}</td>
+        <td class="num">${money(r.spend, cur)}</td>
+        <td class="num">${num(r.impressions)}</td>
+        <td class="num">${num(r.reach)}</td>
+        <td class="num">${money(r._cpm, cur)}</td>
+        <td class="num">${(r.frequency || 0).toFixed(2)}</td>
+        <td class="num">${r.results ? num(r.results) : "—"}</td>
+        <td class="num ${best ? "best" : ""}">${r.cost_per_result ? money(r.cost_per_result, cur) : "—"}</td>
+      </tr>`;
+    }).join("");
 
-    // ---- Tabela de conjuntos ----
-    const linhas = [...adsets].sort((a, b) => b.spend - a.spend).map((a) => `
-      <tr>
-        <td><span class="dot roxo"></span><span class="dot roxo2"></span> <strong>${esc(a.name)}</strong></td>
-        <td>${esc(statusLabel(a.status))}</td>
-        <td class="num">${a.results ? num(a.results) : "—"}</td>
-        <td class="num">${money(a.spend, cur)}</td>
-        <td class="num">${num(a.impressions)}</td>
-        <td class="num">${num(a.reach)}</td>
-        <td class="num">${a.cost_per_result ? money(a.cost_per_result, cur) : "—"}</td>
-      </tr>`).join("");
-    const tabelaConjuntos = `
-      <table>
+    // ---- Narrativas (heurísticas) ----
+    const entregaTxt =
+      `A conta entregou ${num(tImpr)} impressões para ${num(tReach)} pessoas únicas, com frequência média de ` +
+      `${freqMedia.toFixed(2).replace(".", ",")} — cada pessoa viu os anúncios pouco mais de uma vez no período. ` +
+      `O CPM médio ficou em ${money(cpmMedio, cur)}.`;
+
+    const resultadoTxt = comResultado.length
+      ? `Apenas ${comResultado.length} de ${rows.length} ${unidade} registraram resultado no período. ` +
+        (melhor ? `O destaque foi <strong>${esc(melhor.name)}</strong> — ${num(melhor.results)} ${(melhor.results_label || "resultados").toLowerCase()} a ${money(melhor.cost_per_result, cur)} cada` : "") +
+        (pior && melhor && melhor.cost_per_result ? `, contra ${money(pior.cost_per_result, cur)} do ${esc(pior.name)} (${(pior.cost_per_result / melhor.cost_per_result).toFixed(1)}x mais caro).` : ".")
+      : `Nenhum ${level} registrou resultado rastreável no período — vale auditar o disparo do pixel/eventos antes de decisões de corte.`;
+
+    // ---- Diagnóstico / recomendações ----
+    const pontos = [];
+    const semRes = rows.filter((r) => r.spend > 0 && r.results === 0);
+    if (semRes.length) pontos.push(`<strong>Gasto sem resultado rastreado.</strong> ${semRes.length} ${unidade} investiram mas não registraram resultado (${money(semRes.reduce((s, r) => s + r.spend, 0), cur)}). Hipótese mais provável: falha de rastreamento de evento — não necessariamente desempenho ruim.`);
+    if (melhor && !isActive(melhor.status)) pontos.push(`<strong>O mais eficiente está pausado.</strong> ${esc(melhor.name)} entregou o melhor custo por resultado (${money(melhor.cost_per_result, cur)}) e está inativo.`);
+    if (rows.length >= 8) pontos.push(`<strong>Verba pulverizada.</strong> ${rows.length} ${unidade} dividindo ${money(tSpend, cur)} resultam em frequência média de ${freqMedia.toFixed(2).replace(".", ",")} — geralmente insuficiente pra resposta em conversão e pra sair da fase de aprendizado.`);
+    if (serie) pontos.push(`<strong>Concorrência interna na série ${esc(serieNome)}.</strong> ${serie.length} ${unidade} disputando público semelhante elevam o CPM e dificultam a leitura de qual variação performa melhor.`);
+
+    const recs = [];
+    if (semRes.length) recs.push(`<strong>Auditar o pixel antes de cortar.</strong> Confirmar no Events Manager se os eventos disparam nas páginas dos ${unidade} sem resultado. Sem isso, qualquer pausa pode descartar quem converte sem registrar.`);
+    if (serie) recs.push(`<strong>Consolidar a série ${esc(serieNome)}.</strong> Concentrar verba em 1–2 variações de melhor sinal em vez de manter várias competindo entre si — reduz CPM e acelera aprendizado.`);
+    if (melhor && !isActive(melhor.status)) recs.push(`<strong>Reativar ${esc(melhor.name)}.</strong> Provou ser o caminho mais barato (${money(melhor.cost_per_result, cur)}/resultado). Reativar com orçamento dedicado.`);
+    recs.push(`<strong>Elevar a frequência com remarketing.</strong> Criar conjunto sobre as ~${num(tReach)} pessoas alcançadas pra gerar o 2º e 3º contato que hoje não acontecem.`);
+    if (melhor) recs.push(`<strong>Definir meta de custo por resultado.</strong> Usar ${money(melhor.cost_per_result, cur)} como benchmark e estabelecer um teto pra orientar corte e escala.`);
+
+    // ---- Monta HTML ----
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8" />
+<title>${esc(title)} — Relatório Brandcast</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>${CSS}</style></head>
+<body>
+  <div class="actions"><button onclick="window.print()">Imprimir / Salvar PDF</button></div>
+
+  <!-- Faixas fixas (repetem em cada página impressa) -->
+  <div class="band band-top">
+    <span class="band-brand">${logo ? `<img src="${logo}" alt="Brandcast" />` : ""} Agência Brandcast — ${esc(title)}</span>
+    <span>${esc(periodo)}</span>
+  </div>
+  <div class="band band-bot">
+    <span>Fonte: Gerenciador de Anúncios (Meta Ads) · Atribuição: clique 7d / visualização 1d</span>
+    <span>Agência Brandcast</span>
+  </div>
+
+  <main>
+    <!-- SEÇÃO 1: Dashboard geral -->
+    <section class="sec">
+      <h1>Dashboard Geral</h1>
+      <p class="lead">Visão consolidada dos ${rows.length} ${unidade} no período de ${esc(periodo)}.</p>
+      <div class="kpis">
+        <div class="kpi"><div class="kpi-v">${money(tSpend, cur)}</div><div class="kpi-l">Investimento total</div><div class="kpi-s">${money(spendAtivos, cur)} em ativos</div></div>
+        <div class="kpi"><div class="kpi-v">${num(tImpr)}</div><div class="kpi-l">Impressões</div><div class="kpi-s">CPM médio ${money(cpmMedio, cur)}</div></div>
+        <div class="kpi"><div class="kpi-v">${num(tReach)}</div><div class="kpi-l">Alcance</div><div class="kpi-s">frequência ${freqMedia.toFixed(2).replace(".", ",")}</div></div>
+        <div class="kpi"><div class="kpi-v">${num(tRes)}</div><div class="kpi-l">${esc(resLabel)}</div><div class="kpi-s">${comResultado.length} ${level}(s) converteram</div></div>
+        <div class="kpi"><div class="kpi-v">${ativos.length}/${rows.length}</div><div class="kpi-l">${level === "conjunto" ? "Conjuntos ativos" : "Campanhas ativas"}</div><div class="kpi-s">${rows.length - ativos.length} pausados</div></div>
+      </div>
+      <h3 class="chart-title">Investimento por ${level} (${cur === "BRL" ? "R$" : cur})</h3>
+      <div class="chart-wrap tall"><canvas id="cInvest"></canvas></div>
+      <div class="two">
+        <div>${temFunil ? `<h3 class="chart-title">Investimento por etapa do funil</h3><div class="chart-wrap"><canvas id="cFunil"></canvas></div>` : ""}</div>
+        <div><h3 class="chart-title">Verba em ativos × inativos</h3><div class="chart-wrap"><canvas id="cAtivos"></canvas></div></div>
+      </div>
+    </section>
+
+    <!-- SEÇÃO 2: Entrega e custo -->
+    <section class="sec break">
+      <h1>Entrega e Custo de Mídia</h1>
+      <p>${entregaTxt}</p>
+      <h3 class="chart-title">Impressões × Alcance por ${level}</h3>
+      <div class="chart-wrap tall"><canvas id="cImprReach"></canvas></div>
+      <h3 class="chart-title">CPM por ${level} (custo por mil impressões)</h3>
+      <div class="chart-wrap tall"><canvas id="cCpm"></canvas></div>
+    </section>
+
+    <!-- SEÇÃO 3: Tabela de performance -->
+    <section class="sec break">
+      <h1>Performance por ${level === "conjunto" ? "Conjunto de Anúncios" : "Campanha"}</h1>
+      <table class="perf">
         <thead><tr>
-          <th>Conjunto de anúncios</th><th>Status</th><th class="num">${esc(resultLabel)}</th>
-          <th class="num">Investido</th><th class="num">Impressões</th><th class="num">Alcance</th><th class="num">Custo/result.</th>
+          <th class="left">${level === "conjunto" ? "Conjunto" : "Campanha"}</th><th>Status</th>
+          <th class="num">Gasto</th><th class="num">Impr.</th><th class="num">Alcance</th>
+          <th class="num">CPM</th><th class="num">Freq.</th><th class="num">Result.</th><th class="num">Custo/Res.</th>
         </tr></thead>
-        <tbody>
-          ${linhas}
-          <tr class="total"><td>TOTAL</td><td>—</td><td class="num">${num(tConv)}</td>
-            <td class="num">${money(tInvest, cur)}</td><td class="num">${num(tImpr)}</td>
-            <td class="num">${num(tReach)}</td><td class="num">${melhor ? money(cpr, cur) : "—"}</td></tr>
+        <tbody>${linhas}
+          <tr class="total"><td class="left">TOTAL</td><td>${ativos.length} ativos</td>
+            <td class="num">${money(tSpend, cur)}</td><td class="num">${num(tImpr)}</td>
+            <td class="num">${num(tReach)}</td><td class="num">${money(cpmMedio, cur)}</td>
+            <td class="num">${freqMedia.toFixed(2)}</td><td class="num">${num(tRes)}</td><td class="num">—</td></tr>
         </tbody>
-      </table>`;
+      </table>
+      ${comResultado.length ? `
+        <h2>Resultados e custo por resultado</h2>
+        <p>${resultadoTxt}</p>
+        <div class="two">
+          <div><h3 class="chart-title">Resultados registrados</h3><div class="chart-wrap"><canvas id="cRes"></canvas></div></div>
+          <div><h3 class="chart-title">Custo por resultado</h3><div class="chart-wrap"><canvas id="cCpr"></canvas></div></div>
+        </div>` : `<p>${resultadoTxt}</p>`}
+    </section>
 
-    const semResultado = comGasto.filter((a) => a.results === 0);
-    const obs = semResultado.length
-      ? `<p class="muted-note">Observação: ${semResultado.map((a) => esc(a.name)).join(", ")} ` +
-        `${semResultado.length === 1 ? "teve gasto" : "tiveram gasto"} mas não registr${semResultado.length === 1 ? "ou" : "aram"} ` +
-        `resultados — possível objetivo de otimização diferente ou problema de configuração.</p>`
-      : "";
+    ${serie ? `
+    <!-- SEÇÃO 4: Análise da série -->
+    <section class="sec break">
+      <h1>Análise da Série ${esc(serieNome)}</h1>
+      <p>A série <strong>${esc(serieNome)}</strong> reúne ${serie.length} variações e concentrou
+        ${money(serie.reduce((s, r) => s + r.spend, 0), cur)} (${Math.round(serie.reduce((s, r) => s + r.spend, 0) / tSpend * 100)}% do investimento).
+        Quando variações com entrega semelhante têm resultados muito diferentes, vale verificar o rastreamento antes de otimizar.</p>
+      <h3 class="chart-title">${esc(serieNome)} — gasto × entrega</h3>
+      <div class="chart-wrap tall"><canvas id="cSerie"></canvas></div>
+    </section>` : ""}
 
-    // ---- Comparativo top 2 ----
-    let comparativo = "";
-    if (rank.length >= 2) {
-      const [a1, a2] = rank; // a1 = melhor (menor CPR)
-      const row = (label, v1, v2, melhorEh) => {
-        const c1 = melhorEh === 1 ? "green-cell" : "";
-        const c2 = melhorEh === 2 ? "green-cell" : "";
-        return `<tr><td>${label}</td><td class="${c1}">${v1}</td><td class="${c2}">${v2}</td></tr>`;
-      };
-      const cpm1 = a1.cpm || (a1.impressions ? (a1.spend / a1.impressions) * 1000 : 0);
-      const cpm2 = a2.cpm || (a2.impressions ? (a2.spend / a2.impressions) * 1000 : 0);
-      comparativo = `
-        <h2 class="sec">Comparativo: ${esc(a2.name)} vs ${esc(a1.name)}</h2>
-        <p>Os dois conjuntos com melhor performance são comparados abaixo. Valores em <span class="green">verde</span> indicam o melhor desempenho na métrica.</p>
-        <table class="cmp">
-          <thead><tr><th>Métrica</th><th>${esc(a2.name)}</th><th>${esc(a1.name)}</th></tr></thead>
-          <tbody>
-            ${row("Investimento", money(a2.spend, cur), money(a1.spend, cur), a2.spend < a1.spend ? 1 : 2)}
-            ${row(resultLabel, num(a2.results), num(a1.results), a2.results > a1.results ? 1 : 2)}
-            ${row("Custo por resultado", money(a2.cost_per_result, cur), money(a1.cost_per_result, cur), a2.cost_per_result < a1.cost_per_result ? 1 : 2)}
-            ${row("Impressões", num(a2.impressions), num(a1.impressions), a2.impressions > a1.impressions ? 1 : 2)}
-            ${row("Alcance", num(a2.reach), num(a1.reach), a2.reach > a1.reach ? 1 : 2)}
-            ${row("CPM", money(cpm2, cur), money(cpm1, cur), cpm2 < cpm1 ? 1 : 2)}
-            ${row("Frequência", (a2.frequency || 0).toFixed(2).replace(".", ","), (a1.frequency || 0).toFixed(2).replace(".", ","), 0)}
-          </tbody>
-        </table>`;
-    }
+    <!-- SEÇÃO: Eficiência scatter -->
+    <section class="sec ${serie ? "" : "break"}">
+      <h1>Eficiência de Alcance × Frequência</h1>
+      <p>Cada ponto é um ${level}. Eixo X = custo por mil pessoas alcançadas, eixo Y = frequência, tamanho = investimento.
+        Quanto mais à esquerda, mais barato pra alcançar público novo.</p>
+      <div class="chart-wrap tall"><canvas id="cScatter"></canvas></div>
+    </section>
 
-    // ---- Recomendações (heurística) ----
-    const recs = [];
-    if (melhor) recs.push(`<strong>Escalar o ${esc(melhor.name)}:</strong> é o conjunto mais eficiente da campanha (menor custo por resultado, ${money(melhor.cost_per_result, cur)}). Aumente o orçamento de forma gradual (20–30%) pra preservar a aprendizagem do algoritmo.`);
-    if (pior && economiaPct > 0) recs.push(`<strong>Revisar o ${esc(pior.name)}:</strong> custo por resultado ${economiaPct}% mais alto que o melhor conjunto. Antes de pausar, teste duplicar o vencedor com variação de público.`);
-    if (semResultado.length) recs.push(`<strong>Investigar ${semResultado.map((a) => esc(a.name)).join(", ")}:</strong> gastaram sem gerar resultado. Verifique o objetivo de otimização e o indicador de resultado.`);
-    const inativos = adsets.filter((a) => a.spend === 0);
-    if (inativos.length) recs.push(`<strong>Ativar ou descartar ${inativos.map((a) => esc(a.name)).join(", ")}:</strong> não tiveram veiculação no período. Use como testes A/B contra o conjunto vencedor ou remova pra simplificar a campanha.`);
-    if (melhor) recs.push(`<strong>Definir meta de custo por resultado:</strong> use o ${esc(melhor.name)} como benchmark (${money(melhor.cost_per_result, cur)}) e estabeleça um teto de tolerância pra pausar conjuntos acima disso.`);
+    <!-- SEÇÃO: Diagnóstico -->
+    <section class="sec break">
+      <h1>Diagnóstico e Recomendações</h1>
+      ${pontos.length ? `<h2>Pontos de atenção</h2><ol class="diag">${pontos.map((p) => `<li>${p}</li>`).join("")}</ol>` : ""}
+      <h2>Recomendações</h2>
+      <ul class="recs">${recs.map((r) => `<li>${r}</li>`).join("")}</ul>
+    </section>
+  </main>
 
-    const body = `
-      <h2 class="sec">Resumo executivo</h2>
-      ${resumo.map((p) => `<p>${p}</p>`).join("")}
-      <h2 class="sec">Visão geral dos indicadores</h2>
-      ${kpisHtml}
-      <p class="muted-note">Frequência indica em média quantas vezes cada pessoa alcançada viu o anúncio. CPM é o custo a cada mil impressões. Custo por resultado considera apenas conjuntos que geraram resultado.</p>
-      <h2 class="sec">Desempenho por conjunto de anúncios</h2>
-      <p>Tabela consolidada com todos os conjuntos da campanha no período analisado:</p>
-      ${tabelaConjuntos}
-      ${obs}
-      ${comparativo}
-      ${recs.length ? `<h2 class="sec">Recomendações</h2><ul class="recs">${recs.map((r) => `<li>${r}</li>`).join("")}</ul>` : ""}
-    `;
+  <script>
+    (function () {
+      if (typeof Chart === "undefined") return;
+      var D = ${chartData};
+      var BLUE = "#2d6cdf", BLUE_L = "#7aa6ef", GRAY = "#b4bcc8", GREEN = "#16a34a", RED = "#dc2626",
+          ORANGE = "#f59e0b", PURPLE = "#6C02ED", PURPLE_L = "#a78bfa";
+      var moneyFmt = function (v) { return new Intl.NumberFormat("pt-BR",{style:"currency",currency:D.cur}).format(v||0); };
+      var numFmt = function (v) { return new Intl.NumberFormat("pt-BR").format(Math.round(v||0)); };
+      Chart.defaults.font.family = "-apple-system, Segoe UI, Roboto, sans-serif";
+      Chart.defaults.font.size = 11;
+      Chart.defaults.color = "#374151";
+      var noLegend = { legend: { display: false } };
 
-    openReport(shell({
-      logoUri, kicker: "Relatório de Campanha", title: campaign.name,
-      sub: `Conjuntos de anúncios • ${periodo}`,
-      body, footName: `Relatório ${campaign.name} • Agência Brandcast`,
-    }), onError);
+      // 1. Investimento por linha (barras horizontais, cor por status)
+      new Chart(document.getElementById("cInvest"), {
+        type: "bar",
+        data: { labels: D.invest.labels, datasets: [{ data: D.invest.values,
+          backgroundColor: D.invest.active.map(function (a) { return a ? BLUE : GRAY; }),
+          borderRadius: 3 }] },
+        options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: function (c) { return moneyFmt(c.parsed.x); } } } },
+          scales: { x: { grid: { color: "#eee" }, ticks: { callback: function (v) { return numFmt(v); } } },
+            y: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
+      });
+
+      // 2. Funil (donut com total no centro)
+      if (D.funil) {
+        new Chart(document.getElementById("cFunil"), {
+          type: "doughnut",
+          data: { labels: D.funil.labels, datasets: [{ data: D.funil.values,
+            backgroundColor: [BLUE, GREEN, ORANGE, GRAY], borderColor: "#fff", borderWidth: 2 }] },
+          options: { responsive: true, maintainAspectRatio: false, animation: false, cutout: "62%",
+            plugins: { legend: { position: "bottom", labels: { font: { size: 10 } } },
+              tooltip: { callbacks: { label: function (c) { return c.label + ": " + moneyFmt(c.parsed); } } } } },
+          plugins: [centerText(moneyFmt(D.invest.values.reduce(function(a,b){return a+b;},0)), "total")]
+        });
+      }
+
+      // 3. Ativos x inativos (donut)
+      new Chart(document.getElementById("cAtivos"), {
+        type: "doughnut",
+        data: { labels: ["Ativos", "Inativos"], datasets: [{ data: [D.ativos.ativo, D.ativos.inativo],
+          backgroundColor: [GREEN, GRAY], borderColor: "#fff", borderWidth: 2 }] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false, cutout: "62%",
+          plugins: { legend: { position: "bottom", labels: { font: { size: 10 } } },
+            tooltip: { callbacks: { label: function (c) { return c.label + ": " + moneyFmt(c.parsed); } } } } },
+        plugins: [centerText(D.ativos.n + " de " + D.ativos.total, "ativos")]
+      });
+
+      // 4. Impressões x Alcance (barras agrupadas verticais)
+      new Chart(document.getElementById("cImprReach"), {
+        type: "bar",
+        data: { labels: D.imprReach.labels, datasets: [
+          { label: "Impressões", data: D.imprReach.impr, backgroundColor: BLUE, borderRadius: 3 },
+          { label: "Alcance", data: D.imprReach.reach, backgroundColor: BLUE_L, borderRadius: 3 } ] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { position: "top" }, tooltip: { callbacks: { label: function (c) { return c.dataset.label + ": " + numFmt(c.parsed.y); } } } },
+          scales: { x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 40, minRotation: 40 } },
+            y: { grid: { color: "#eee" }, ticks: { callback: function (v) { return numFmt(v); } } } } }
+      });
+
+      // 5. CPM por linha (barras horizontais, verde<=média / vermelho>média, linha de média)
+      new Chart(document.getElementById("cCpm"), {
+        type: "bar",
+        data: { labels: D.cpm.labels, datasets: [{ data: D.cpm.values,
+          backgroundColor: D.cpm.values.map(function (v) { return v > D.cpm.media ? RED : GREEN; }),
+          borderRadius: 3 }] },
+        options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) { return moneyFmt(c.parsed.x); } } } },
+          scales: { x: { grid: { color: "#eee" }, ticks: { callback: function (v) { return moneyFmt(v); } } },
+            y: { grid: { display: false }, ticks: { font: { size: 10 } } } } },
+        plugins: [avgLine(D.cpm.media, moneyFmt(D.cpm.media))]
+      });
+
+      // 6. Resultados + custo por resultado
+      if (D.resultados) {
+        new Chart(document.getElementById("cRes"), {
+          type: "bar",
+          data: { labels: D.resultados.labels, datasets: [{ data: D.resultados.res, backgroundColor: GREEN, borderRadius: 4 }] },
+          options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: noLegend,
+            scales: { x: { grid: { display: false }, ticks: { font: { size: 9 } } }, y: { grid: { color: "#eee" } } } }
+        });
+        new Chart(document.getElementById("cCpr"), {
+          type: "bar",
+          data: { labels: D.resultados.labels, datasets: [{ data: D.resultados.cpr, backgroundColor: PURPLE, borderRadius: 4 }] },
+          options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: function (c) { return moneyFmt(c.parsed.y); } } } },
+            scales: { x: { grid: { display: false }, ticks: { font: { size: 9 } } }, y: { grid: { color: "#eee" }, ticks: { callback: function (v) { return moneyFmt(v); } } } } }
+        });
+      }
+
+      // 7. Série (gasto x impressões, eixo duplo)
+      if (D.serie) {
+        new Chart(document.getElementById("cSerie"), {
+          type: "bar",
+          data: { labels: D.serie.labels, datasets: [
+            { label: "Gasto", data: D.serie.spend, backgroundColor: BLUE, borderRadius: 3, yAxisID: "y" },
+            { label: "Impressões", data: D.serie.impr, backgroundColor: ORANGE, borderRadius: 3, yAxisID: "y1" } ] },
+          options: { responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { position: "top" } },
+            scales: { x: { grid: { display: false } },
+              y: { position: "left", grid: { color: "#eee" }, ticks: { callback: function (v) { return moneyFmt(v); } } },
+              y1: { position: "right", grid: { display: false }, ticks: { callback: function (v) { return numFmt(v); } } } } }
+        });
+      }
+
+      // 8. Scatter eficiência (bubble)
+      new Chart(document.getElementById("cScatter"), {
+        type: "bubble",
+        data: { datasets: [
+          { label: "Ativo", data: D.scatter.filter(function (p) { return p.active; }), backgroundColor: "rgba(45,108,223,.65)" },
+          { label: "Inativo", data: D.scatter.filter(function (p) { return !p.active; }), backgroundColor: "rgba(180,188,200,.65)" } ] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { position: "top" },
+            tooltip: { callbacks: { label: function (c) { var p = c.raw; return p.name + " — " + moneyFmt(p.x) + "/mil alcance · freq " + p.y; } } } },
+          scales: { x: { title: { display: true, text: "Custo por mil alcançadas (" + (D.cur === "BRL" ? "R$" : D.cur) + ")" }, grid: { color: "#eee" } },
+            y: { title: { display: true, text: "Frequência" }, grid: { color: "#eee" } } } }
+      });
+
+      // plugin: texto no centro do donut
+      function centerText(big, small) {
+        return { id: "ct" + Math.random(), afterDraw: function (chart) {
+          var a = chart.getDatasetMeta(0).data[0]; if (!a) return;
+          var x = a.x, y = a.y, ctx = chart.ctx;
+          ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillStyle = "#1f2937"; ctx.font = "700 18px -apple-system, sans-serif";
+          ctx.fillText(big, x, y - 6);
+          ctx.fillStyle = "#9ca3af"; ctx.font = "400 11px -apple-system, sans-serif";
+          ctx.fillText(small, x, y + 12); ctx.restore();
+        } };
+      }
+      // plugin: linha vertical de média no gráfico horizontal
+      function avgLine(media, label) {
+        return { id: "avg" + Math.random(), afterDraw: function (chart) {
+          var xs = chart.scales.x; if (!xs) return;
+          var px = xs.getPixelForValue(media), top = chart.chartArea.top, bot = chart.chartArea.bottom, ctx = chart.ctx;
+          ctx.save(); ctx.strokeStyle = "#6b7280"; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, bot); ctx.stroke();
+          ctx.setLineDash([]); ctx.fillStyle = "#6b7280"; ctx.font = "700 10px -apple-system, sans-serif";
+          ctx.textAlign = "left"; ctx.fillText("média " + label, px + 4, top + 10); ctx.restore();
+        } };
+      }
+    })();
+  </script>
+</body></html>`;
+
+    const w = window.open("", "_blank");
+    if (!w) { if (onError) onError("Permita pop-ups deste site para gerar o relatório."); return; }
+    w.document.open(); w.document.write(html); w.document.close();
   } catch (e) {
     if (onError) onError(e instanceof Error ? e.message : "Falha ao gerar relatório.");
   }
 }
 
 // ============================================================================
-// 2) RELATÓRIO DE CLIENTE — visão consolidada das campanhas do cliente.
-//    Mantém a assinatura antiga { clients, accountId, datePreset, ... }.
+// CSS
 // ============================================================================
+const CSS = `
+  :root { --roxo:#6C02ED; --navy:#1e1442; --txt:#1f2937; --muted:#6b7280; --borda:#e5e7eb; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { background:#fff; color:var(--txt); font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:12.5px; line-height:1.55; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  main { max-width:880px; margin:0 auto; padding:74px 40px 60px; }
+
+  /* Faixas fixas (repetem por página na impressão) */
+  .band { position:fixed; left:0; right:0; display:flex; align-items:center; justify-content:space-between;
+    padding:10px 40px; font-size:11px; z-index:100; }
+  .band-top { top:0; background:linear-gradient(90deg,var(--navy),#3a1d6e); color:#fff; font-weight:600; }
+  .band-top .band-brand { display:flex; align-items:center; gap:8px; }
+  .band-top img { height:18px; width:auto; filter:brightness(0) invert(1); }
+  .band-bot { bottom:0; background:#fff; border-top:1px solid var(--borda); color:var(--muted); }
+
+  .sec { margin-bottom:30px; }
+  .sec.break { page-break-before:always; padding-top:8px; }
+  h1 { font-size:24px; font-weight:800; color:var(--navy); margin-bottom:6px; }
+  h2 { font-size:16px; font-weight:700; color:var(--navy); margin:20px 0 8px; }
+  h3.chart-title { font-size:14px; font-weight:700; color:var(--roxo); text-align:center; margin:18px 0 8px; }
+  p { margin-bottom:10px; }
+  .lead { color:var(--muted); margin-bottom:16px; }
+
+  .kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:0; border:1px solid var(--borda);
+    border-radius:8px; overflow:hidden; }
+  .kpi { padding:14px 10px; text-align:center; border-right:1px solid var(--borda); }
+  .kpi:last-child { border-right:none; }
+  .kpi-v { font-size:20px; font-weight:800; color:var(--roxo); }
+  .kpi-l { font-size:9.5px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--muted); margin-top:3px; }
+  .kpi-s { font-size:10px; color:var(--muted); margin-top:3px; }
+
+  .chart-wrap { position:relative; height:260px; width:100%; break-inside:avoid; }
+  .chart-wrap.tall { height:340px; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
+
+  table.perf { width:100%; border-collapse:collapse; font-size:11px; margin:8px 0; }
+  table.perf thead th { background:var(--navy); color:#fff; padding:8px; text-align:right; font-size:10px; }
+  table.perf thead th.left { text-align:left; }
+  table.perf td { padding:7px 8px; border-bottom:1px solid var(--borda); text-align:right; }
+  table.perf td.left { text-align:left; font-weight:600; }
+  table.perf td.num { font-variant-numeric:tabular-nums; }
+  table.perf tr:nth-child(even) { background:#f9fafb; }
+  table.perf tr.total td { font-weight:800; background:#f3f4f6; border-top:2px solid var(--navy); }
+  .st-ativo { color:var(--roxo); font-weight:600; }
+  .st-inativo { color:var(--muted); }
+  td.best { background:#dcfce7; color:#15803d; font-weight:800; }
+
+  ol.diag, ul.recs { margin:6px 0 10px 18px; }
+  ol.diag li, ul.recs li { margin-bottom:9px; padding-left:4px; }
+
+  .actions { position:fixed; top:50px; right:16px; z-index:200; }
+  .actions button { background:var(--roxo); color:#fff; border:none; border-radius:8px; padding:9px 16px;
+    font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(108,2,237,.3); }
+  @media print { .actions { display:none; } main { padding:74px 0 50px; } @page { margin:0; size:A4; } }
+`;
+
+// ============================================================================
+// Funções exportadas — mapeiam pros geradores antigos pra não quebrar imports.
+// ============================================================================
+export async function generateCampaignReport({ campaign, adsets = [], onError, datePreset, currency }) {
+  return generateWeekly({
+    title: campaign?.name || "Campanha", level: "conjunto", rows: adsets,
+    datePreset, currency: currency || "BRL", onError,
+  });
+}
+
 export async function generateReport({ clients = [], accountId, datePreset, onError }) {
-  try {
-    const logoUri = await getBrandLogoDataUri();
-    const periodo = fmtPeriodoExtenso(datePreset);
-    const isSingle = !!accountId;
-    const client = isSingle ? clients.find((c) => c.account_id === accountId) : null;
-    const campaigns = isSingle
-      ? (client?.campaigns || [])
-      : clients.flatMap((c) => (c.campaigns || []).map((cp) => ({ ...cp, _cur: c.currency })));
-    const cur = isSingle ? (client?.currency || "BRL") : "BRL";
-    const title = isSingle ? (client?.name || "Cliente") : "Consolidado de Clientes";
-
-    const tInvest = campaigns.reduce((s, c) => s + (c.spend || 0), 0);
-    const tRev = campaigns.reduce((s, c) => s + (c.revenue || 0), 0);
-    const tRes = campaigns.reduce((s, c) => s + (c.results || 0), 0);
-    const tImpr = campaigns.reduce((s, c) => s + (c.impressions || 0), 0);
-    const tClicks = campaigns.reduce((s, c) => s + (c.clicks || 0), 0);
-    const tReach = campaigns.reduce((s, c) => s + (c.reach || 0), 0);
-    const ativas = campaigns.filter((c) => c.status === "ACTIVE").length;
-    const roas = tInvest ? tRev / tInvest : 0;
-    const ctr = tImpr ? (tClicks / tImpr) * 100 : 0;
-    const cpr = tRes ? tInvest / tRes : 0;
-    const comResultado = campaigns.filter((c) => c.cost_per_result > 0);
-    const melhor = [...comResultado].sort((a, b) => a.cost_per_result - b.cost_per_result)[0];
-    const temRoas = campaigns.some((c) => c.roas > 0);
-
-    const resumo = [];
-    resumo.push(
-      `${isSingle ? `O cliente <strong>${esc(title)}</strong>` : `O portfólio consolidado`} teve ${campaigns.length} campanha(s) ` +
-      `no período de ${periodo}, sendo ${ativas} ativa(s). ` +
-      `Foram investidos <strong>${money(tInvest, cur)}</strong>, gerando ${num(tImpr)} impressões e ${num(tRes)} resultados.`
-    );
-    if (temRoas) resumo.push(`A receita atribuída foi de <strong>${money(tRev, cur)}</strong>, um ROAS de <strong>${roas.toFixed(2)}x</strong>.`);
-    if (melhor) resumo.push(`A campanha de melhor eficiência foi <strong>${esc(melhor.name)}</strong>, com o menor custo por resultado (${money(melhor.cost_per_result, cur)}).`);
-
-    const kpisHtml = `<div class="kpis">
-      ${kpi("Valor Investido", money(tInvest, cur))}
-      ${kpi("Resultados", num(tRes))}
-      ${kpi("Custo por Resultado", cpr ? money(cpr, cur) : "—")}
-      ${temRoas ? kpi("Receita", money(tRev, cur)) : kpi("Alcance", num(tReach))}
-      ${kpi("Impressões", num(tImpr))}
-      ${kpi("Cliques", num(tClicks))}
-      ${kpi("CTR", pct(ctr))}
-      ${temRoas ? kpi("ROAS", roas.toFixed(2) + "x") : kpi("Campanhas Ativas", num(ativas))}
-    </div>`;
-
-    const linhas = [...campaigns].sort((a, b) => b.spend - a.spend).map((c) => `
-      <tr>
-        <td><strong>${esc(c.name)}</strong>${!isSingle && c.client ? `<br><span style="color:var(--muted);font-size:10px">${esc(c.client)}</span>` : ""}</td>
-        <td>${esc(statusLabel(c.status))}</td>
-        <td class="num">${money(c.spend, c._cur || cur)}</td>
-        <td class="num">${c.results ? num(c.results) : "—"}</td>
-        <td class="num">${c.cost_per_result ? money(c.cost_per_result, c._cur || cur) : "—"}</td>
-        <td class="num">${(c.roas || 0).toFixed(2)}x</td>
-      </tr>`).join("");
-    const tabela = `
-      <table>
-        <thead><tr><th>Campanha</th><th>Status</th><th class="num">Investido</th>
-          <th class="num">Resultados</th><th class="num">Custo/result.</th><th class="num">ROAS</th></tr></thead>
-        <tbody>${linhas}
-          <tr class="total"><td>TOTAL</td><td>—</td><td class="num">${money(tInvest, cur)}</td>
-            <td class="num">${num(tRes)}</td><td class="num">${cpr ? money(cpr, cur) : "—"}</td>
-            <td class="num">${roas.toFixed(2)}x</td></tr>
-        </tbody>
-      </table>`;
-
-    const recs = [];
-    if (melhor) recs.push(`<strong>Priorizar ${esc(melhor.name)}:</strong> melhor custo por resultado do período (${money(melhor.cost_per_result, cur)}). Concentre verba aqui.`);
-    const semConv = campaigns.filter((c) => c.spend > 0 && c.results === 0);
-    if (semConv.length) recs.push(`<strong>Revisar ${semConv.length} campanha(s) sem resultado:</strong> ${semConv.slice(0, 3).map((c) => esc(c.name)).join(", ")}${semConv.length > 3 ? "…" : ""}. Verifique objetivo e pixel.`);
-    const ruins = campaigns.filter((c) => c.roas > 0 && c.roas < 1);
-    if (ruins.length) recs.push(`<strong>Atenção a ${ruins.length} campanha(s) com ROAS < 1:</strong> estão gastando mais do que retornam.`);
-
-    const body = `
-      <h2 class="sec">Resumo executivo</h2>
-      ${resumo.map((p) => `<p>${p}</p>`).join("")}
-      <h2 class="sec">Visão geral dos indicadores</h2>
-      ${kpisHtml}
-      <h2 class="sec">Desempenho por campanha</h2>
-      ${tabela}
-      ${recs.length ? `<h2 class="sec">Recomendações</h2><ul class="recs">${recs.map((r) => `<li>${r}</li>`).join("")}</ul>` : ""}
-    `;
-
-    openReport(shell({
-      logoUri, kicker: isSingle ? "Relatório de Cliente" : "Relatório Consolidado",
-      title, sub: `Performance de campanhas • ${periodo}`,
-      body, footName: `Relatório ${title} • Agência Brandcast`,
-    }), onError);
-  } catch (e) {
-    if (onError) onError(e instanceof Error ? e.message : "Falha ao gerar relatório.");
-  }
+  const isSingle = !!accountId;
+  const client = isSingle ? clients.find((c) => c.account_id === accountId) : null;
+  const rows = isSingle
+    ? (client?.campaigns || [])
+    : clients.flatMap((c) => c.campaigns || []);
+  return generateWeekly({
+    title: isSingle ? (client?.name || "Cliente") : "Consolidado",
+    level: "campanha", rows, datePreset,
+    currency: isSingle ? (client?.currency || "BRL") : "BRL", onError,
+  });
 }
 
-// ============================================================================
-// 3) RELATÓRIO DE CAMPANHAS FILTRADAS — lista simples no mesmo template.
-//    Mantém assinatura { campaigns, clients, datePreset, filters, onError }.
-// ============================================================================
 export async function generateCampaignsReport({ campaigns = [], datePreset, onError }) {
-  try {
-    const logoUri = await getBrandLogoDataUri();
-    const periodo = fmtPeriodoExtenso(datePreset);
-    const cur = campaigns[0]?.currency || "BRL";
-
-    const tInvest = campaigns.reduce((s, c) => s + (c.spend || 0), 0);
-    const tRes = campaigns.reduce((s, c) => s + (c.results || 0), 0);
-    const tImpr = campaigns.reduce((s, c) => s + (c.impressions || 0), 0);
-    const cpr = tRes ? tInvest / tRes : 0;
-    const melhor = [...campaigns].filter((c) => c.cost_per_result > 0).sort((a, b) => a.cost_per_result - b.cost_per_result)[0];
-
-    const kpisHtml = `<div class="kpis">
-      ${kpi("Campanhas", num(campaigns.length))}
-      ${kpi("Investido", money(tInvest, cur))}
-      ${kpi("Resultados", num(tRes))}
-      ${kpi("Custo/Resultado", cpr ? money(cpr, cur) : "—")}
-    </div>`;
-
-    const linhas = [...campaigns].sort((a, b) => b.spend - a.spend).map((c) => `
-      <tr>
-        <td><strong>${esc(c.name)}</strong></td>
-        <td>${esc(statusLabel(c.status))}</td>
-        <td class="num">${money(c.spend, c.currency || cur)}</td>
-        <td class="num">${c.results ? num(c.results) : "—"}</td>
-        <td class="num">${c.cost_per_result ? money(c.cost_per_result, c.currency || cur) : "—"}</td>
-        <td class="num">${(c.roas || 0).toFixed(2)}x</td>
-      </tr>`).join("");
-
-    const body = `
-      <h2 class="sec">Visão geral</h2>
-      ${kpisHtml}
-      ${melhor ? `<p style="margin-top:10px">Destaque: <strong>${esc(melhor.name)}</strong> com o menor custo por resultado (${money(melhor.cost_per_result, cur)}).</p>` : ""}
-      <h2 class="sec">Campanhas no período</h2>
-      <table>
-        <thead><tr><th>Campanha</th><th>Status</th><th class="num">Investido</th>
-          <th class="num">Resultados</th><th class="num">Custo/result.</th><th class="num">ROAS</th></tr></thead>
-        <tbody>${linhas}
-          <tr class="total"><td>TOTAL</td><td>—</td><td class="num">${money(tInvest, cur)}</td>
-            <td class="num">${num(tRes)}</td><td class="num">${cpr ? money(cpr, cur) : "—"}</td><td class="num">—</td></tr>
-        </tbody>
-      </table>`;
-
-    openReport(shell({
-      logoUri, kicker: "Relatório de Campanhas", title: "Campanhas",
-      sub: `Performance • ${periodo}`, body, footName: "Relatório de Campanhas • Agência Brandcast",
-    }), onError);
-  } catch (e) {
-    if (onError) onError(e instanceof Error ? e.message : "Falha ao gerar relatório.");
-  }
+  return generateWeekly({
+    title: "Campanhas", level: "campanha", rows: campaigns,
+    datePreset, currency: campaigns[0]?.currency || "BRL", onError,
+  });
 }
 
-// Compat: relatório de gráficos cai no de campanhas.
-export async function generateChartsReport(args) {
-  return generateCampaignsReport(args);
-}
+export async function generateChartsReport(args) { return generateCampaignsReport(args); }
 
-// ============================================================================
-// 4) RELATÓRIO VISUAL — espelha a tela de dashboards do cliente.
-//    Recebe os gráficos já capturados da tela (como imagens PNG) + KPIs.
-// ============================================================================
-export async function generateVisualReport({ clientName, datePreset, kpis = [], charts = [], onError }) {
-  try {
-    const logoUri = await getBrandLogoDataUri();
-    const periodo = fmtPeriodoExtenso(datePreset);
-
-    const kpisHtml = kpis.length ? `<div class="kpis">
-      ${kpis.map((k) => kpi(k.label, k.value)).join("")}
-    </div>` : "";
-
-    // Gráficos como cards escuros (espelham a tela), 1 ou 2 por linha.
-    const chartsHtml = charts.length ? `
-      <div class="viz-grid">
-        ${charts.map((c) => `
-          <figure class="viz-card${c.wide ? " wide" : ""}">
-            ${c.title ? `<figcaption>${esc(c.title)}</figcaption>` : ""}
-            <img src="${c.img}" alt="${esc(c.title || "Gráfico")}" />
-          </figure>`).join("")}
-      </div>` : `<p class="muted-note">Nenhum gráfico capturado.</p>`;
-
-    const body = `
-      <h2 class="sec">Visão geral dos indicadores</h2>
-      ${kpisHtml}
-      <h2 class="sec">Visualizações</h2>
-      <p>Painéis exatamente como exibidos no dashboard do cliente.</p>
-      ${chartsHtml}
-    `;
-
-    // CSS extra pros cards de gráfico (injetado via <style> adicional no shell).
-    const extraCss = `
-      .viz-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; }
-      .viz-card { background: #16131e; border: 1px solid #2a2440; border-radius: 12px;
-        padding: 12px; break-inside: avoid; }
-      .viz-card.wide { grid-column: 1 / -1; }
-      .viz-card figcaption { color: #c4b5fd; font-size: 12px; font-weight: 700;
-        margin-bottom: 8px; padding-left: 2px; }
-      .viz-card img { width: 100%; height: auto; display: block; border-radius: 8px; }
-    `;
-    const html = shell({
-      logoUri, kicker: "Relatório Visual", title: clientName || "Dashboard",
-      sub: `Painéis de performance • ${periodo}`,
-      body, footName: `Relatório Visual ${clientName || ""} • Agência Brandcast`,
-    }).replace("</style>", extraCss + "</style>");
-
-    openReport(html, onError);
-  } catch (e) {
-    if (onError) onError(e instanceof Error ? e.message : "Falha ao gerar relatório visual.");
-  }
+// O relatório "visual" (captura de tela) agora cai no relatório completo com gráficos nativos.
+export async function generateVisualReport({ clientName, datePreset, onError }) {
+  if (onError) onError("Use o botão Relatório PDF — agora ele já inclui todos os gráficos.");
+  void clientName; void datePreset;
 }
