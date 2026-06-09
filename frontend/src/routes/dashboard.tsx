@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer,
   Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis,
@@ -16,7 +16,50 @@ import { useDashboard, type Period } from "@/hooks/useDashboard";
 import { fmtMoney, fmtNum, saveMetaToken, getManualSaldo, type Client, type Campaign } from "@/lib/api/client";
 import { roasClass, cpaClass, cpaMedian } from "@/lib/saldo";
 // @ts-expect-error report.js — gerador de relatório PDF Brandcast
-import { generateReport } from "@/lib/report.js";
+import { generateReport, generateVisualReport } from "@/lib/report.js";
+
+// Serializa um <svg> da tela em PNG (fundo escuro do card) pra embutir no relatório.
+function svgToPng(svg: SVGSVGElement): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const rect = svg.getBoundingClientRect();
+      const w = Math.max(1, Math.round(rect.width));
+      const h = Math.max(1, Math.round(rect.height));
+      const clone = svg.cloneNode(true) as SVGSVGElement;
+      clone.setAttribute("width", String(w));
+      clone.setAttribute("height", String(h));
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      const xml = new XMLSerializer().serializeToString(clone);
+      const src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(xml)));
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = w * 2; canvas.height = h * 2;
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = "#16131e"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.scale(2, 2);
+        ctx.drawImage(img, 0, 0, w, h);
+        try { resolve(canvas.toDataURL("image/png")); } catch { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = src;
+    } catch { resolve(null); }
+  });
+}
+
+// Captura todos os gráficos (recharts SVGs) dentro do container do dashboard.
+async function captureDashboardCharts(root: HTMLElement) {
+  const surfaces = Array.from(root.querySelectorAll<SVGSVGElement>("svg.recharts-surface"));
+  const charts: { title: string; img: string; wide: boolean }[] = [];
+  for (const svg of surfaces) {
+    const section = svg.closest("section");
+    const title = section?.querySelector("h3")?.textContent?.trim() || "Gráfico";
+    const wide = (svg.getBoundingClientRect().width || 0) > 600;
+    const png = await svgToPng(svg);
+    if (png) charts.push({ title, img: png, wide });
+  }
+  return charts;
+}
 
 // Paleta refinada: roxo Brandcast como dominante + acentos pastéis pra contraste.
 const PALETTE = ["#8b5cf6", "#a78bfa", "#c4b5fd", "#4ade80", "#5eead4", "#fbbf24", "#fb7185", "#f472b6"];
@@ -256,6 +299,32 @@ function FullScreenMsg({ children }: { children: React.ReactNode }) {
 // =============== Dashboard completo de UM cliente ===============
 function ClientDashboard({ client, period }: { client: Client; period: Period }) {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const dashRef = useRef<HTMLDivElement>(null);
+
+  async function gerarRelatorioVisual() {
+    if (!dashRef.current) return;
+    setCapturing(true);
+    try {
+      const charts = await captureDashboardCharts(dashRef.current);
+      const kpisList = [
+        { label: "Investido", value: fmtMoney(k.spend, client.currency) },
+        { label: "Resultados", value: fmtNum(k.results) },
+        { label: "Custo/Result.", value: k.cpa ? fmtMoney(k.cpa, client.currency) : "—" },
+        { label: "Conversas", value: fmtNum(k.conversations) },
+        { label: "Impressões", value: fmtNum(k.impressions) },
+        { label: "Alcance", value: fmtNum(k.reach) },
+        { label: "Cliques", value: fmtNum(k.clicks) },
+        { label: "CTR", value: k.ctr.toFixed(2).replace(".", ",") + "%" },
+      ];
+      await generateVisualReport({
+        clientName: client.name, datePreset: period, kpis: kpisList, charts,
+        onError: (m: string) => alert(m),
+      });
+    } finally {
+      setCapturing(false);
+    }
+  }
 
   // KPIs
   const k = useMemo(() => {
@@ -286,7 +355,7 @@ function ClientDashboard({ client, period }: { client: Client; period: Period })
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" ref={dashRef}>
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -296,14 +365,21 @@ function ClientDashboard({ client, period }: { client: Client; period: Period })
             act_{client.account_id} · {client.currency} · {client.campaigns.length} campanha(s)
           </div>
         </div>
-        <button
-          onClick={() => generateReport({
-            clients: [client], accountId: client.account_id, datePreset: period,
-            manualSaldo: getManualSaldo(), onError: (m: string) => alert(m),
-          })}
-          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_4px_16px_-4px_rgba(139,92,246,0.5)] transition-all hover:brightness-110">
-          <FileText className="size-4" /> Gerar Relatório PDF
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={gerarRelatorioVisual} disabled={capturing}
+            className="inline-flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-4 py-2.5 text-sm font-semibold text-primary transition-all hover:bg-primary/20 disabled:opacity-50">
+            <BarChart3 className="size-4" /> {capturing ? "Capturando..." : "Relatório com Gráficos"}
+          </button>
+          <button
+            onClick={() => generateReport({
+              clients: [client], accountId: client.account_id, datePreset: period,
+              manualSaldo: getManualSaldo(), onError: (m: string) => alert(m),
+            })}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_4px_16px_-4px_rgba(139,92,246,0.5)] transition-all hover:brightness-110">
+            <FileText className="size-4" /> Relatório PDF
+          </button>
+        </div>
       </div>
 
       {/* KPIs */}
