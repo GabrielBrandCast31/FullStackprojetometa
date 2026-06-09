@@ -154,6 +154,61 @@ async def fetch_campaign_insights(
     return await _paged(client, url, params)
 
 
+async def fetch_adsets(client, version, campaign_id, token) -> list[dict]:
+    """Lista os conjuntos de anuncios de UMA campanha."""
+    url = f"{GRAPH}/{version}/{campaign_id}/adsets"
+    params = {
+        "fields": (
+            "id,name,status,effective_status,optimization_goal,"
+            "daily_budget,lifetime_budget,start_time,end_time,campaign_id"
+        ),
+        "limit": 200,
+        "access_token": token,
+    }
+    return await _paged(client, url, params)
+
+
+async def fetch_ads(client, version, campaign_id, token) -> list[dict]:
+    """Lista os anuncios de UMA campanha (com o adset_id de cada um)."""
+    url = f"{GRAPH}/{version}/{campaign_id}/ads"
+    params = {
+        "fields": "id,name,status,effective_status,adset_id,creative{thumbnail_url}",
+        "limit": 300,
+        "access_token": token,
+    }
+    return await _paged(client, url, params)
+
+
+_INSIGHT_FIELDS = (
+    "spend,impressions,clicks,ctr,cpc,cpm,reach,frequency,"
+    "actions,action_values,purchase_roas,inline_link_clicks"
+)
+
+
+async def fetch_campaign_breakdown_insights(
+    client, version, campaign_id, token, level, date_preset
+) -> list[dict]:
+    """Insights de uma campanha quebrados por `level` ('adset' ou 'ad').
+
+    Uma chamada no endpoint da campanha com level=adset/ad traz o id do nivel
+    correspondente em cada linha (adset_id / ad_id).
+    """
+    url = f"{GRAPH}/{version}/{campaign_id}/insights"
+    fields = _INSIGHT_FIELDS
+    if level == "adset":
+        fields = "adset_id," + fields
+    elif level == "ad":
+        fields = "ad_id,adset_id," + fields
+    params = {
+        "level": level,
+        "fields": fields,
+        "date_preset": date_preset or "last_30d",
+        "limit": 500,
+        "access_token": token,
+    }
+    return await _paged(client, url, params)
+
+
 async def fetch_account_timeseries(
     client, version, account_id, token, date_preset
 ) -> list[dict]:

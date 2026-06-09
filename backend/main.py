@@ -415,6 +415,54 @@ async def cache_stats_endpoint(_: dict = Depends(require_auth)):
     return cache.stats()
 
 
+class BreakdownRequest(BaseModel):
+    campaign_id: str
+    date_preset: str = "last_30d"
+    force_refresh: bool = False
+
+
+@app.post("/api/campaign/breakdown")
+async def get_campaign_breakdown(req: BreakdownRequest, user: dict = Depends(require_auth)):
+    """Quebra de UMA campanha em conjuntos (adsets) e anuncios (ads) com metricas.
+
+    Usa o token armazenado do usuario. Cacheia 30 min por (user, campaign, period).
+    """
+    user_id = user.get("sub") or ""
+    token = auth.get_meta_token(user_id)
+    if not token:
+        raise HTTPException(status_code=400, detail="Nenhum access token do Meta cadastrado.")
+
+    campaign_id = req.campaign_id.strip()
+    if not campaign_id:
+        raise HTTPException(status_code=400, detail="campaign_id é obrigatório.")
+
+    cache_key = f"breakdown:{user_id}:{campaign_id}:{req.date_preset}"
+    if not req.force_refresh:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return {**cached, "from_cache": True}
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            raw_adsets, adset_ins, raw_ads, ad_ins = await asyncio.gather(
+                meta_client.fetch_adsets(client, API_VERSION, campaign_id, token),
+                meta_client.fetch_campaign_breakdown_insights(
+                    client, API_VERSION, campaign_id, token, "adset", req.date_preset),
+                meta_client.fetch_ads(client, API_VERSION, campaign_id, token),
+                meta_client.fetch_campaign_breakdown_insights(
+                    client, API_VERSION, campaign_id, token, "ad", req.date_preset),
+            )
+        breakdown = analysis.build_breakdown(raw_adsets, adset_ins, raw_ads, ad_ins)
+    except meta_client.MetaAPIError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Falha de conexão com a API do Meta.")
+
+    result = {"campaign_id": campaign_id, "date_preset": req.date_preset, **breakdown}
+    cache.set(cache_key, result)
+    return {**result, "from_cache": False}
+
+
 class PagesRequest(BaseModel):
     access_token: str
 

@@ -100,13 +100,16 @@ def build_campaigns(raw_campaigns: list[dict], raw_insights: list[dict]) -> list
         else:
             budget, budget_type = 0.0, "Por conjunto"
 
-        # "Resultados" = conversoes reais (compras > leads). Sem isso, fica zero.
-        # `link_clicks` segue exposto separadamente — nao entra como fallback aqui
-        # para nao inflar artificialmente a metrica de conversao.
+        # "Resultados" = objetivo principal da campanha, na ordem de prioridade:
+        # compras > leads > conversas (WhatsApp/Messenger). Campanhas de mensagem
+        # tem o resultado = conversa iniciada, entao o custo por resultado fica
+        # correto (custo por conversa). `link_clicks` segue exposto a parte.
         if purchases:
             results, results_label = purchases, "Compras"
         elif leads:
             results, results_label = leads, "Leads"
+        elif conversations:
+            results, results_label = conversations, "Conversas"
         else:
             results, results_label = 0.0, "—"
 
@@ -149,6 +152,109 @@ def build_campaigns(raw_campaigns: list[dict], raw_insights: list[dict]) -> list
         })
 
     return result
+
+
+def _metrics_from_insight(ins: dict) -> dict:
+    """Extrai metricas derivadas de uma linha de insight (campanha/adset/ad).
+
+    Reaproveitado por adsets e ads no breakdown da campanha.
+    """
+    spend = _to_float(ins.get("spend"))
+    actions = ins.get("actions", [])
+    action_values = ins.get("action_values", [])
+
+    purchases = _action_value(actions, PURCHASE_TYPES)
+    leads = _action_value(actions, LEAD_TYPES)
+    link_clicks = _action_value(actions, ["link_click"])
+    conversations = _action_value(actions, CONVERSATION_TYPES)
+    revenue = _action_value(action_values, PURCHASE_TYPES)
+
+    roas_list = ins.get("purchase_roas") or []
+    roas = _to_float(roas_list[0].get("value")) if roas_list else (revenue / spend if spend else 0.0)
+
+    if purchases:
+        results, results_label = purchases, "Compras"
+    elif leads:
+        results, results_label = leads, "Leads"
+    elif conversations:
+        results, results_label = conversations, "Conversas"
+    else:
+        results, results_label = 0.0, "—"
+
+    cpa = spend / results if results else 0.0
+    clicks = int(_to_float(ins.get("clicks")))
+
+    return {
+        "spend": round(spend, 2),
+        "impressions": int(_to_float(ins.get("impressions"))),
+        "clicks": clicks,
+        "link_clicks": int(_to_float(ins.get("inline_link_clicks")) or link_clicks),
+        "reach": int(_to_float(ins.get("reach"))),
+        "frequency": round(_to_float(ins.get("frequency")), 2),
+        "ctr": round(_to_float(ins.get("ctr")), 2),
+        "cpc": round(_to_float(ins.get("cpc")), 2),
+        "cpm": round(_to_float(ins.get("cpm")), 2),
+        "purchases": round(purchases, 2),
+        "leads": round(leads, 2),
+        "conversations": round(conversations, 2),
+        "cost_per_conversation": round(spend / conversations if conversations else 0.0, 2),
+        "revenue": round(revenue, 2),
+        "roas": round(roas, 2),
+        "results": round(results, 2),
+        "results_label": results_label,
+        "cpa": round(cpa, 2),
+        "cost_per_result": round(cpa, 2),
+        "conv_rate": round(results / clicks * 100 if clicks else 0.0, 2),
+    }
+
+
+def _budget(entity: dict) -> tuple[float, str]:
+    daily = _to_float(entity.get("daily_budget"))
+    lifetime = _to_float(entity.get("lifetime_budget"))
+    if daily:
+        return daily / 100, "Diário"
+    if lifetime:
+        return lifetime / 100, "Total"
+    return 0.0, "—"
+
+
+def build_breakdown(
+    raw_adsets: list[dict], adset_insights: list[dict],
+    raw_ads: list[dict], ad_insights: list[dict],
+) -> dict:
+    """Monta a quebra de uma campanha em conjuntos e anuncios, cada um com metricas.
+
+    Cada anuncio inclui `adset_id` pra agrupar por conjunto no frontend.
+    """
+    adset_ins_by_id = {i.get("adset_id"): i for i in adset_insights}
+    ad_ins_by_id = {i.get("ad_id"): i for i in ad_insights}
+
+    adsets = []
+    for a in raw_adsets:
+        budget, budget_type = _budget(a)
+        adsets.append({
+            "id": a.get("id"),
+            "name": a.get("name", "(sem nome)"),
+            "status": a.get("effective_status") or a.get("status") or "UNKNOWN",
+            "optimization_goal": a.get("optimization_goal", ""),
+            "budget": round(budget, 2),
+            "budget_type": budget_type,
+            **_metrics_from_insight(adset_ins_by_id.get(a.get("id"), {})),
+        })
+
+    ads = []
+    for a in raw_ads:
+        creative = a.get("creative") or {}
+        ads.append({
+            "id": a.get("id"),
+            "name": a.get("name", "(sem nome)"),
+            "status": a.get("effective_status") or a.get("status") or "UNKNOWN",
+            "adset_id": a.get("adset_id", ""),
+            "thumbnail_url": creative.get("thumbnail_url", ""),
+            **_metrics_from_insight(ad_ins_by_id.get(a.get("id"), {})),
+        })
+
+    return {"adsets": adsets, "ads": ads}
 
 
 def previous_period_range(date_preset: str) -> dict | None:

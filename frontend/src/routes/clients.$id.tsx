@@ -39,6 +39,23 @@ function ClientDetailPage() {
     [d.clients, id],
   );
 
+  // Debug banner — visivel sempre no topo pra rastrear estado
+  if (typeof console !== "undefined") {
+    console.log("[ClientDetail]", { id, authChecked: d.authChecked, tokenConfigured: d.tokenConfigured, loading: d.loading, clientsCount: d.clients.length, found: !!client, error: d.error });
+  }
+  const debugBanner = (
+    <div className="fixed top-2 right-2 z-50 max-w-md rounded-md border border-primary/40 bg-card/95 px-3 py-2 font-mono text-[10px] text-muted-foreground shadow-lg backdrop-blur">
+      <div className="mb-1 font-bold text-primary">DEBUG ClientDetail</div>
+      <div>id na URL: <span className="text-foreground">{id}</span></div>
+      <div>auth checked: <span className="text-foreground">{String(d.authChecked)}</span></div>
+      <div>token configurado: <span className="text-foreground">{String(d.tokenConfigured)}</span></div>
+      <div>loading: <span className="text-foreground">{String(d.loading)}</span></div>
+      <div>clientes carregados: <span className="text-foreground">{d.clients.length}</span></div>
+      <div>cliente encontrado: <span className="text-foreground">{client ? client.name : "❌ não"}</span></div>
+      {d.error && <div className="text-destructive">erro: {d.error}</div>}
+    </div>
+  );
+
   const saldo = useMemo(
     () => client ? computeSaldo(client, d.manualSaldo, period) : null,
     [client, d.manualSaldo, period],
@@ -77,11 +94,11 @@ function ClientDetailPage() {
 
   // Estados de loading/erro/missing — sem redirect automático (evita loop)
   if (!d.authChecked || d.tokenConfigured === null) {
-    return <FullScreen message="Verificando sessão..." />;
+    return <>{debugBanner}<FullScreen message="Verificando sessão..." /></>;
   }
   if (!d.tokenConfigured) {
     return (
-      <FullScreen>
+      <>{debugBanner}<FullScreen>
         <div className="rounded-2xl border border-border bg-card p-6 max-w-md text-center">
           <h2 className="text-base font-semibold">Token do Meta não configurado</h2>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -92,15 +109,15 @@ function ClientDetailPage() {
             Ir pra Visão Geral
           </button>
         </div>
-      </FullScreen>
+      </FullScreen></>
     );
   }
   if (d.loading && !d.clients.length) {
-    return <FullScreen message="Carregando dados do Meta..." />;
+    return <>{debugBanner}<FullScreen message="Carregando dados do Meta..." /></>;
   }
   if (!d.loading && d.clients.length === 0) {
     return (
-      <FullScreen>
+      <>{debugBanner}<FullScreen>
         <div className="rounded-2xl border border-border bg-card p-6 max-w-md text-center">
           <h2 className="text-base font-semibold">Sem dados disponíveis</h2>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -111,28 +128,33 @@ function ClientDetailPage() {
             Atualizar dados
           </button>
         </div>
-      </FullScreen>
+      </FullScreen></>
     );
   }
   if (!client) {
     return (
-      <FullScreen>
+      <>{debugBanner}<FullScreen>
         <div className="rounded-2xl border border-border bg-card p-6 max-w-md text-center">
           <h2 className="text-base font-semibold">Cliente não encontrado</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             O cliente com ID <code className="font-mono text-foreground">{id}</code> não está na lista carregada.
+          </p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            IDs disponíveis: {d.clients.map((c) => c.account_id).slice(0, 5).join(", ")}
+            {d.clients.length > 5 && ` ... e mais ${d.clients.length - 5}`}
           </p>
           <button onClick={() => nav({ to: "/clients" })}
             className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
             Voltar pra lista
           </button>
         </div>
-      </FullScreen>
+      </FullScreen></>
     );
   }
 
   return (
     <div className="min-h-screen bg-background font-sans text-foreground selection:bg-primary/30">
+      {debugBanner}
       <Sidebar onLogout={d.logout} userName={d.user?.name || d.user?.email || ""} />
 
       <main className="p-6 lg:ml-64 lg:p-8">

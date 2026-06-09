@@ -206,12 +206,19 @@ function ClientsPage() {
                       const isActive = c.account_status === 1;
                       const statusLabel = STATUS_LABELS[c.account_status] || "Desconhecido";
                       const saldo = c.spend_cap - c.amount_spent;
+                      const detailHref = `/clients/${c.account_id}`;
                       return (
                         <tr key={c.account_id}
-                            className="cursor-pointer transition-colors hover:bg-white/[0.02]"
-                            onClick={() => nav({ to: "/clients/$id", params: { id: c.account_id } })}>
+                            className="cursor-pointer transition-colors hover:bg-primary/5"
+                            onClick={() => {
+                              console.log("[Clients] click row →", detailHref);
+                              window.location.href = detailHref;
+                            }}>
                           <td className="px-6 py-4">
-                            <div className="font-medium">{c.name}</div>
+                            <a href={detailHref} className="font-medium text-primary hover:underline"
+                               onClick={(e) => { e.stopPropagation(); console.log("[Clients] link click →", detailHref); }}>
+                              {c.name}
+                            </a>
                             <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">act_{c.account_id}</div>
                             {c.error && (
                               <div className="mt-1 text-[11px] text-destructive">⚠ {c.error}</div>

@@ -181,6 +181,54 @@ export async function fetchTimeseries(
   });
 }
 
+// ============== Breakdown de campanha (adsets + ads) ==============
+export interface BreakdownEntity {
+  id: string;
+  name: string;
+  status: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  link_clicks: number;
+  reach: number;
+  frequency: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  purchases: number;
+  conversations: number;
+  revenue: number;
+  roas: number;
+  results: number;
+  results_label: string;
+  cost_per_result: number;
+}
+export interface AdSet extends BreakdownEntity {
+  optimization_goal: string;
+  budget: number;
+  budget_type: string;
+}
+export interface Ad extends BreakdownEntity {
+  adset_id: string;
+  thumbnail_url: string;
+}
+export interface BreakdownResponse {
+  campaign_id: string;
+  date_preset: string;
+  adsets: AdSet[];
+  ads: Ad[];
+  from_cache?: boolean;
+}
+
+export async function fetchCampaignBreakdown(
+  campaign_id: string, date_preset = "last_30d", force_refresh = false,
+): Promise<BreakdownResponse> {
+  return apiFetch("/api/campaign/breakdown", {
+    method: "POST",
+    body: JSON.stringify({ campaign_id, date_preset, force_refresh }),
+  });
+}
+
 // ============== Meta token (armazenado no backend) ==============
 export async function getMetaTokenStatus(): Promise<{ configured: boolean; preview: string }> {
   return apiFetch("/api/meta/token");

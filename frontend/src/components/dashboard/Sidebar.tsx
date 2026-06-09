@@ -1,8 +1,9 @@
-import { LayoutDashboard, Megaphone, Users, Bell, BarChart3, LogOut } from "lucide-react";
+import { LayoutDashboard, Megaphone, Users, Bell, BarChart3, LogOut, UserCircle2 } from "lucide-react";
 import { Link, useLocation } from "@tanstack/react-router";
 
 const nav = [
   { label: "Visão Geral", icon: LayoutDashboard, to: "/" },
+  { label: "Dashboard Cliente", icon: UserCircle2, to: "/dashboard" },
   { label: "Clientes", icon: Users, to: "/clients" },
   { label: "Campanhas", icon: Megaphone, to: "/campaigns" },
   { label: "Alertas", icon: Bell, to: "/alerts" },
