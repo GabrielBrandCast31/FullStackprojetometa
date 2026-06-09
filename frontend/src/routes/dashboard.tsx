@@ -10,11 +10,13 @@ import { CostChart } from "@/components/dashboard/CostChart";
 import { CampaignBreakdownModal } from "@/components/dashboard/CampaignBreakdownModal";
 import {
   DollarSign, MousePointerClick, TrendingUp, Wallet, Target, BarChart3,
-  Eye, Users, MessageCircle, LogOut, RefreshCw, Trophy, Flame, Sparkles, Search,
+  Eye, Users, MessageCircle, LogOut, RefreshCw, Trophy, Flame, Sparkles, Search, FileText,
 } from "lucide-react";
 import { useDashboard, type Period } from "@/hooks/useDashboard";
-import { fmtMoney, fmtNum, saveMetaToken, type Client, type Campaign } from "@/lib/api/client";
+import { fmtMoney, fmtNum, saveMetaToken, getManualSaldo, type Client, type Campaign } from "@/lib/api/client";
 import { roasClass, cpaClass, cpaMedian } from "@/lib/saldo";
+// @ts-expect-error report.js — gerador de relatório PDF Brandcast
+import { generateReport } from "@/lib/report.js";
 
 // Paleta refinada: roxo Brandcast como dominante + acentos pastéis pra contraste.
 const PALETTE = ["#8b5cf6", "#a78bfa", "#c4b5fd", "#4ade80", "#5eead4", "#fbbf24", "#fb7185", "#f472b6"];
@@ -141,6 +143,21 @@ function DashboardPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {/* Relatório PDF — sempre visível. Gera do cliente selecionado, ou
+                  consolidado de todos se nenhum estiver selecionado. */}
+              <button
+                onClick={() => generateReport({
+                  clients: client ? [client] : d.clients,
+                  accountId: client ? client.account_id : null,
+                  datePreset: period,
+                  manualSaldo: getManualSaldo(),
+                  onError: (m: string) => alert(m),
+                })}
+                disabled={!d.clients.length}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[0_4px_16px_-4px_rgba(139,92,246,0.5)] transition-all hover:brightness-110 disabled:opacity-40">
+                <FileText className="size-4" />
+                {client ? "Relatório do Cliente" : "Relatório Geral"}
+              </button>
               <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1">
                 {PERIODS.map((p) => (
                   <button key={p.id} onClick={() => setPeriod(p.id)}
@@ -271,12 +288,22 @@ function ClientDashboard({ client, period }: { client: Client; period: Period })
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">Cliente · Meta Ads</div>
-        <h2 className="mt-0.5 text-3xl font-bold tracking-tight">{client.name}</h2>
-        <div className="mt-1 text-xs text-muted-foreground">
-          act_{client.account_id} · {client.currency} · {client.campaigns.length} campanha(s)
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">Cliente · Meta Ads</div>
+          <h2 className="mt-0.5 text-3xl font-bold tracking-tight">{client.name}</h2>
+          <div className="mt-1 text-xs text-muted-foreground">
+            act_{client.account_id} · {client.currency} · {client.campaigns.length} campanha(s)
+          </div>
         </div>
+        <button
+          onClick={() => generateReport({
+            clients: [client], accountId: client.account_id, datePreset: period,
+            manualSaldo: getManualSaldo(), onError: (m: string) => alert(m),
+          })}
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[0_4px_16px_-4px_rgba(139,92,246,0.5)] transition-all hover:brightness-110">
+          <FileText className="size-4" /> Gerar Relatório PDF
+        </button>
       </div>
 
       {/* KPIs */}
@@ -304,19 +331,7 @@ function ClientDashboard({ client, period }: { client: Client; period: Period })
       </div>
 
       {/* Destaques */}
-      {client.campaigns.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <HighlightCard icon={Trophy} cls="border-l-success text-success bg-success/5" title="Melhor ROAS"
-            campaign={[...client.campaigns].filter((c) => c.spend > 0).sort((a, b) => b.roas - a.roas)[0]}
-            valueFmt={(c) => `${c.roas.toFixed(2)}x`} />
-          <HighlightCard icon={Sparkles} cls="border-l-primary text-primary bg-primary/5" title="Menor Custo/Conv."
-            campaign={[...client.campaigns].filter((c) => c.cost_per_result > 0).sort((a, b) => a.cost_per_result - b.cost_per_result)[0]}
-            valueFmt={(c) => fmtMoney(c.cost_per_result, client.currency)} />
-          <HighlightCard icon={Flame} cls="border-l-orange-400 text-orange-400 bg-orange-400/5" title="Mais Conversões"
-            campaign={[...client.campaigns].filter((c) => c.results > 0).sort((a, b) => b.results - a.results)[0]}
-            valueFmt={(c) => fmtNum(c.results)} />
-        </div>
-      )}
+      {client.campaigns.length > 0 && <Highlights client={client} />}
 
       {/* Status counters */}
       {client.campaigns.length > 0 && <StatusCounters client={client} />}
@@ -377,6 +392,46 @@ function ChartCard({ title, caption, children }: {
       </header>
       {children}
     </section>
+  );
+}
+
+// Escolhe os 3 destaques mais relevantes pro cliente. Adapta quando não há
+// receita (campanhas de lead/conversa): troca "Melhor ROAS" por "Melhor CTR".
+function Highlights({ client }: { client: Client }) {
+  const withSpend = client.campaigns.filter((c) => c.spend > 0);
+  const withResults = client.campaigns.filter((c) => c.cost_per_result > 0);
+  const temRoas = withSpend.some((c) => c.roas > 0);
+
+  // Card 1: ROAS se houver receita; senão melhor CTR.
+  const roasTop = temRoas
+    ? [...withSpend].sort((a, b) => b.roas - a.roas)[0]
+    : undefined;
+  const ctrTop = !temRoas
+    ? [...withSpend].filter((c) => c.impressions > 100).sort((a, b) => b.ctr - a.ctr)[0]
+    : undefined;
+
+  // Card 2: menor custo por resultado (já inclui conversas após fix do backend).
+  const cheapest = [...withResults].sort((a, b) => a.cost_per_result - b.cost_per_result)[0];
+
+  // Card 3: mais resultados.
+  const mostResults = [...client.campaigns].filter((c) => c.results > 0).sort((a, b) => b.results - a.results)[0];
+
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      {temRoas ? (
+        <HighlightCard icon={Trophy} cls="border-l-success text-success bg-success/5" title="Melhor ROAS"
+          campaign={roasTop} valueFmt={(c) => `${c.roas.toFixed(2)}x`} />
+      ) : (
+        <HighlightCard icon={Trophy} cls="border-l-success text-success bg-success/5" title="Melhor CTR"
+          campaign={ctrTop} valueFmt={(c) => `${c.ctr.toFixed(2).replace(".", ",")}%`} />
+      )}
+      <HighlightCard icon={Sparkles} cls="border-l-primary text-primary bg-primary/5" title="Menor Custo/Resultado"
+        campaign={cheapest}
+        valueFmt={(c) => `${fmtMoney(c.cost_per_result, client.currency)} · ${c.results_label}`} />
+      <HighlightCard icon={Flame} cls="border-l-orange-400 text-orange-400 bg-orange-400/5" title="Mais Resultados"
+        campaign={mostResults}
+        valueFmt={(c) => `${fmtNum(c.results)} · ${c.results_label}`} />
+    </div>
   );
 }
 

@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { X, Trophy, Crown, Award, Layers, Megaphone, TrendingDown } from "lucide-react";
+import { X, Trophy, Crown, Award, Layers, Megaphone, TrendingDown, FileText } from "lucide-react";
 import {
   fetchCampaignBreakdown, fmtMoney, fmtNum,
   type AdSet, type Ad, type Campaign,
 } from "@/lib/api/client";
+// @ts-expect-error report.js gerador PDF
+import { generateCampaignsReport } from "@/lib/report.js";
 
 const tooltipStyle: React.CSSProperties = {
   background: "rgba(20, 17, 38, 0.96)", border: "1px solid rgba(139, 92, 246, 0.25)",
@@ -99,9 +101,20 @@ export function CampaignBreakdownModal({ campaign, currency, period, onClose }: 
               <span className="font-mono">{fmtMoney(campaign.spend, currency)} investido</span>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg border border-border bg-card p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground">
-            <X className="size-5" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={() => generateCampaignsReport({
+                campaigns: [campaign], clients: [], datePreset: period,
+                filters: { statusFilter: "ALL", clientFilter: "ALL", search: "" },
+                onError: (m: string) => alert(m),
+              })}
+              className="inline-flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/20">
+              <FileText className="size-4" /> PDF
+            </button>
+            <button onClick={onClose} className="rounded-lg border border-border bg-card p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground">
+              <X className="size-5" />
+            </button>
+          </div>
         </header>
 
         <div className="space-y-6 p-6">
